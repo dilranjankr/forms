@@ -675,13 +675,25 @@ async function addVendorTrackingRow(
       sectionStart = lcpMarkerRow !== -1 ? lcpMarkerRow + 1 : 7;
       sectionEnd = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
     }
+    let firstEmpty = -1;
     for (let row = sectionStart; row < sectionEnd; row++) {
-      if (rowEmpty(row)) { vtRow = row; break; }
+      if (rowEmpty(row)) { firstEmpty = row; break; }
     }
-    if (vtRow === -1) {
+    if (firstEmpty === -1) {
+      // Section full → insert a new row at the boundary
       vtRow = sectionEnd;
       ws.getRange(`${vtRow}:${vtRow}`).insert(Excel.InsertShiftDirection.down);
       await context.sync();
+    } else if (firstEmpty === sectionStart) {
+      // First contract in this section → right after the marker
+      vtRow = firstEmpty;
+    } else {
+      // Existing content above → keep `firstEmpty` as a blank separator, place the contract below it
+      vtRow = firstEmpty + 1;
+      if (vtRow >= sectionEnd || !rowEmpty(vtRow)) {
+        ws.getRange(`${vtRow}:${vtRow}`).insert(Excel.InsertShiftDirection.down);
+        await context.sync();
+      }
     }
   } else {
     const stopRow = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
