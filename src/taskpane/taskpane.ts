@@ -1031,6 +1031,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (curTBB !== -1) {
       const srcCol = CL(insertAt + 1);
       wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
+      // A finalized PR column must NOT keep the yellow highlight (only PR#TBB stays yellow)
+      wsVT.getRange(`${col}:${col}`).format.fill.clear();
       await context.sync();
     }
     wsVT.getRange(`${col}5`).values = [[pr.name]];
