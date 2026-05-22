@@ -982,7 +982,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const h = vtH[c] ? String(vtH[c]).trim() : "";
     if (h !== "" && h !== "LDP Total" && h !== "LCP Total") vtExist.add(h);
   }
-  const missing = invPRs.filter((p) => !vtExist.has(p.name));
+  // Only LCP PRs get a column in Vendor Tracking (LDP PRs stay only in the Invoice Worksheet).
+  // .reverse() = create right-to-left.
+  const missing = invPRs.filter((p) => p.isLCP && !vtExist.has(p.name)).reverse();
 
   const vtA = await readValues(context, wsVT.getRange("A5:A60"));
   let clientRow = -1, subContRow = -1;
@@ -1018,6 +1020,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
 
   for (const pr of invPRs) {
+    if (!pr.isLCP) continue; // LDP PRs are not mirrored into Vendor Tracking
     for (let c = 8; c < fin.length; c++) {
       const h = fin[c] ? String(fin[c]).trim() : "";
       if (h === pr.name) {
