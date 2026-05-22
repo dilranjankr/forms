@@ -665,7 +665,7 @@ async function addVendorTrackingRow(
 
   let vtRow = -1;
 
-  if (secType === "LDP" || secType === "LCP") {
+  if (secType === "LDP" || secType === "LCP" || secType === "Change Order") {
     let sectionStart: number, sectionEnd: number;
     if (secType === "LDP") {
       sectionStart = ldpMarkerRow !== -1 ? ldpMarkerRow + 1 : 7;
