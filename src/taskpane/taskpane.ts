@@ -531,9 +531,13 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     insertAt = grandRow;
   }
 
-  // Always start a new group with one blank separator row (clear gap between sections)
+  // One blank separator row between groups: add a blank only if the row above isn't already blank
   if (insertAt > 6) {
-    block.push({ text: "", bold: false, amt: 0 });
+    const prevRowIdx = insertAt - 2;
+    const prevVal = prevRowIdx >= 0 && prevRowIdx < colA.length
+      ? (colA[prevRowIdx][0] ? String(colA[prevRowIdx][0]).trim() : "")
+      : "";
+    if (prevVal !== "") block.push({ text: "", bold: false, amt: 0 });
   }
 
   if (needLCPHdr) block.push({ text: "LCP", bold: true, amt: 0 });
