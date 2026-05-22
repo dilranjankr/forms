@@ -1030,10 +1030,13 @@ async function runUpdatePR(context: Excel.RequestContext) {
     // formulas + formatting carry over (like a manual copy-paste before PR#TBB).
     if (curTBB !== -1) {
       const srcCol = CL(insertAt + 1);
-      // Drop the left neighbour's inherited fill from the new blank column FIRST,
-      // then clone PR#TBB into it = right-click Copy → Insert Copied Cells (no LDP-Total yellow).
-      wsVT.getRange(`${col}1:${col}80`).format.fill.clear();
       wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
+      await context.sync();
+      // Remove ALL highlight on the new PR column — plain fill AND conditional formatting
+      // (the inserted column inherits the LDP-Total highlight; clear both to be safe).
+      const newCol = wsVT.getRange(`${col}1:${col}100`);
+      newCol.format.fill.clear();
+      newCol.conditionalFormats.clearAll();
       await context.sync();
     }
     wsVT.getRange(`${col}5`).values = [[pr.name]];
