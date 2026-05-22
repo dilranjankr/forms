@@ -543,15 +543,15 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   if (secHeader !== "") block.push({ text: secHeader, bold: true, amt: 0 });
   for (const item of items) block.push({ text: item.desc, bold: item.isHdr, amt: item.amt });
 
+  // Always insert fresh rows at insertAt so existing data is NEVER overwritten
+  // (pushes the rest — including the LCP section / totals — down).
   const rowsNeeded = block.length;
-  const available = grandRow - insertAt;
-  if (rowsNeeded > available) {
-    const n = rowsNeeded - available;
-    wsInv.getRange(`${insertAt}:${insertAt + n - 1}`).insert(Excel.InsertShiftDirection.down);
-    grandRow += n;
-    if (ldpSubRow !== -1) ldpSubRow += n;
-    if (lcpSubRow !== -1) lcpSubRow += n;
-    if (lcpHdrRow !== -1 && lcpHdrRow >= insertAt) lcpHdrRow += n;
+  if (rowsNeeded > 0) {
+    wsInv.getRange(`${insertAt}:${insertAt + rowsNeeded - 1}`).insert(Excel.InsertShiftDirection.down);
+    grandRow += rowsNeeded;
+    if (ldpSubRow !== -1) ldpSubRow += rowsNeeded;
+    if (lcpSubRow !== -1) lcpSubRow += rowsNeeded;
+    if (lcpHdrRow !== -1 && lcpHdrRow >= insertAt) lcpHdrRow += rowsNeeded;
     await context.sync();
   }
 
