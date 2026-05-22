@@ -992,10 +992,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
       if (h.toUpperCase().includes("TBB")) curTBB = c;
       if (h === "LCP Total") curLCPTot = c;
     }
+    // Payment Requests always belong in the LCP / PR#TBB area — insert before PR#TBB (never before LDP Total)
     let insertAt = -1;
-    if (!pr.isLCP && curLDPTot !== -1) insertAt = curLDPTot;
-    else if (pr.isLCP && curTBB !== -1) insertAt = curTBB;
-    else if (pr.isLCP && curLCPTot !== -1) insertAt = curLCPTot;
+    if (curTBB !== -1) insertAt = curTBB;
+    else if (curLCPTot !== -1) insertAt = curLCPTot;
     else if (curLDPTot !== -1) insertAt = curLDPTot;
     if (insertAt === -1) continue;
     const col = CL(insertAt);
