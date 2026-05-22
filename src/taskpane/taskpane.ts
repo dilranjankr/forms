@@ -248,6 +248,7 @@ async function generate() {
     await Excel.run(async (context) => { summary = await runInputForm(context, form); });
     setStatus(summary, "ok");
     clearFormUI();
+    poLoaded = false; // refresh PO contracts dropdown on next PO tab visit (new contract added)
   } catch (e) {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
@@ -1024,6 +1025,14 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (insertAt === -1) continue;
     const col = CL(insertAt);
     wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
+    await context.sync();
+    // Copy the PR#TBB column (now shifted one to the right) into the new column so its
+    // formulas + formatting carry over (like a manual copy-paste before PR#TBB).
+    if (curTBB !== -1) {
+      const srcCol = CL(insertAt + 1);
+      wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
+      await context.sync();
+    }
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
