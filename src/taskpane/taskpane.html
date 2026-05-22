@@ -95,6 +95,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="invoice">Invoice Form</button>
             <button class="tab" data-tab="po">PO Form</button>
+            <button class="tab" data-tab="help">Help</button>
         </div>
 
         <!-- ───────── INVOICE FORM ───────── -->
@@ -190,6 +191,34 @@
             <div class="help">
                 <b>ADD PO ADJUSTMENTS</b><br>
                 Select the PO, enter a Contract Adjust amount + Description, then Run Contract Adjust. Adjustment amounts are always saved as negative.
+            </div>
+        </div>
+
+        <!-- ───────── HELP ───────── -->
+        <div id="tab-help" class="tabpane">
+            <div class="banner">HELP &amp; RULES</div>
+
+            <div class="sband">Invoice — how to use</div>
+            <div style="font-size:12.5px; line-height:1.65; color:#2a2a2a; padding:2px;">
+                <b>New LDP / LCP / Change Order:</b> pick Section Type, Column Name, Date, add line items → <b>Run Input Form</b>.<br>
+                <b>Payment Request:</b> click <b>Get PR</b> → edit amounts + set Column Name (e.g. PR#1) → <b>Run Update pr</b>.<br>
+                <b>Finish:</b> <b>Run Invoice Generate</b> — refreshes PR#TBB and makes the PR invoice tabs.
+            </div>
+
+            <div class="sband">Purchase Orders — how to use</div>
+            <div style="font-size:12.5px; line-height:1.65; color:#2a2a2a; padding:2px;">
+                <b>Add POs:</b> choose Source contract, fill PO rows → <b>Run Update Po</b>.<br>
+                <b>Move POs:</b> <b>Run Load Po to Move</b> → tick rows → choose Target → <b>Run Move Po</b>.<br>
+                <b>Adjustment:</b> select Source/PO, enter Contract Adjust + Description → <b>Run Contract Adjust</b>.
+            </div>
+
+            <div class="sband">⚠ Do NOT change in the workbook</div>
+            <div class="help">
+                • <b>Sheet names</b> (Invoice Worksheet, Vendor Tracking, PR#TBB, PO Input Form, Payments) — don't rename.<br>
+                • The bold <b>LDP</b> / <b>LCP</b> marker rows in column A — LDP vs LCP is decided by these (not by the contract name).<br>
+                • Header text: <b>Total To date, Paid to Date, Payment Request, LDP Total, Total, PR#TBB, Grand - TOTALS, SUB - TOTALS - LDP/LCP</b> — keep the exact spelling.<br>
+                • Don't delete the <b>PR#TBB</b> / <b>CO#TBB</b> columns — new columns are inserted before them.<br>
+                • Every Payment Request makes a NEW column. PR#1, PR#2… tabs are frozen snapshots; only PR#TBB stays live.
             </div>
         </div>
 
