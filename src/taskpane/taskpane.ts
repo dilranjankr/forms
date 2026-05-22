@@ -237,6 +237,7 @@ function clearFormUI() {
 
 async function generate() {
   const form = readForm();
+  if (form.secType === "Payment Request") { setStatus("Payment Request ke liye 'Run Update pr' button use karein.", "err"); return; }
   if (!form.secType) { setStatus("Select a Section Type.", "err"); return; }
   if (!form.colName) { setStatus("Enter a Column Name.", "err"); return; }
   if (form.items.length === 0) { setStatus("Add at least one line item.", "err"); return; }
@@ -254,10 +255,18 @@ async function generate() {
 }
 
 async function updatePR() {
-  setStatus("Updating Vendor Tracking…", "busy"); setBusy(true);
+  const form = readForm();
+  const makePR = form.secType === "Payment Request" && form.colName !== "" && form.items.length > 0;
+  setStatus(makePR ? "Creating PR + updating Vendor Tracking…" : "Updating Vendor Tracking…", "busy");
+  setBusy(true);
   try {
-    await Excel.run(async (context) => { await runUpdatePR(context); });
-    setStatus("Vendor Tracking updated — PR columns linked.", "ok");
+    let prMsg = "";
+    await Excel.run(async (context) => {
+      if (makePR) prMsg = await runInputForm(context, form); // create/fill the PR column in the Invoice Worksheet
+      await runUpdatePR(context); // mirror PR columns into Vendor Tracking
+    });
+    setStatus(makePR ? `${prMsg} Vendor Tracking linked.` : "Vendor Tracking updated — PR columns linked.", "ok");
+    if (makePR) clearFormUI();
   } catch (e) {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
