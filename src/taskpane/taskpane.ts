@@ -1067,10 +1067,17 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (h === "LCP Total") nLCPTot = c;
     if (h.toUpperCase().includes("TBB")) nTBB = c;
   }
+  // LCP total column may simply be labelled "Total" (under the "LCP Project" header)
+  if (nLCPTot === -1) {
+    for (let c = nLDPTot + 1; c < fin.length; c++) {
+      const h = fin[c] ? String(fin[c]).trim() : "";
+      if (h === "Total") { nLCPTot = c; break; }
+    }
+  }
   for (let c = 8; c < fin.length; c++) {
     const h = fin[c] ? String(fin[c]).trim() : "";
     if (h === "" || h === "Notes") break;
-    if (h === "LDP Total" || h === "LCP Total" || h.toUpperCase().includes("TBB")) continue;
+    if (c === nLDPTot || c === nLCPTot || c === nTBB) continue;
     if (nLDPTot !== -1 && c < nLDPTot) ldp.push(c);
     else if (nLDPTot !== -1 && c > nLDPTot) lcp.push(c);
   }
