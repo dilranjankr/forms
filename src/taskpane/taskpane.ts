@@ -1108,13 +1108,18 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const po = CL(nPO);
     const vtAr = await readValues(context, wsVT.getRange("A5:A60"));
     const vtB = await readValues(context, wsVT.getRange("B5:B60"));
+    // Classify contracts by the bold "LDP"/"LCP" marker rows (NOT by contract name —
+    // the LCP contract name may not contain "LCP")
     const ldpContracts: number[] = [], lcpContracts: number[] = [];
+    let section = "LDP";
     for (let r = 0; r < vtAr.length; r++) {
       const a = vtAr[r][0] ? String(vtAr[r][0]).trim() : "";
       const b = vtB[r][0];
-      if (a.includes("Client total") || a.includes("Client Total")) break;
+      if (a === "LDP") { section = "LDP"; continue; }
+      if (a === "LCP") { section = "LCP"; continue; }
+      if (a.includes("Client total") || a.includes("Client Total") || a.includes("Analysis")) break;
       if (b !== null && b !== "" && Number(b) > 0) {
-        if (a.toUpperCase().includes("LCP") || a.toUpperCase().includes("CO#") || a.toUpperCase().includes("CO #")) lcpContracts.push(r + 5);
+        if (section === "LCP") lcpContracts.push(r + 5);
         else ldpContracts.push(r + 5);
       }
     }
