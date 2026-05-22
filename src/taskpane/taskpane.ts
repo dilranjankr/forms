@@ -1,0 +1,1802 @@
+/*
+ * Kiser Invoice add-in — Input Form (LDP / LCP / Change Order / Payment Request)
+ * Ported from the Office Script "Run Input Form" to Office.js (Excel.run).
+ * The form lives in this task pane (not in a sheet) so multiple users never collide.
+ */
+
+/* global console, document, Excel, Office */
+
+const FMT_ACCT = '_("$"* #,##0.00_);_("$"* (#,##0.00);_("$"* "-"??_);_(@_)';
+const FMT_USD = '"$"#,##0.00';
+
+interface Item { desc: string; amt: number; isHdr: boolean; }
+interface InputFormData {
+  dateVal: number | "";
+  secType: string;
+  colName: string;
+  secHeader: string;
+  vtTotal: number | "";
+  vtCost: number | "";
+  vtHours: number | "";
+  vtPO: string;
+  items: Item[];
+}
+
+const CL = (i: number): string =>
+  i < 26
+    ? String.fromCharCode(65 + i)
+    : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26));
+
+// Legacy-webview-safe helpers (older Excel webviews lack NodeList.forEach and
+// classList.toggle(force))
+function qsa(sel: string): Element[] {
+  return Array.prototype.slice.call(document.querySelectorAll(sel));
+}
+function toggleCls(el: Element, cls: string, on: boolean) {
+  if (on) el.classList.add(cls);
+  else el.classList.remove(cls);
+}
+
+// ───────────────────────── Form (task pane) ─────────────────────────
+
+let poLoaded = false;
+
+Office.onReady((info) => {
+  if (info.host === Office.HostType.Excel) {
+    (document.getElementById("sideload-msg") as HTMLElement).style.display = "none";
+    (document.getElementById("app-body") as HTMLElement).style.display = "block";
+
+    for (let i = 0; i < 4; i++) addItemRow();
+    for (let i = 0; i < 4; i++) addPORow();
+
+    qsa(".tab").forEach((t) => {
+      (t as HTMLElement).onclick = () => switchTab((t as HTMLElement).getAttribute("data-tab") as string);
+    });
+
+    (document.getElementById("addRow") as HTMLElement).onclick = () => addItemRow();
+    (document.getElementById("generate") as HTMLElement).onclick = generate;
+    (document.getElementById("getPR") as HTMLElement).onclick = getPR;
+    (document.getElementById("updatePR") as HTMLElement).onclick = updatePR;
+    (document.getElementById("invoiceGen") as HTMLElement).onclick = invoiceGen;
+
+    (document.getElementById("addPORow") as HTMLElement).onclick = () => addPORow();
+    (document.getElementById("loadEst") as HTMLElement).onclick = loadEst;
+    (document.getElementById("updatePo") as HTMLElement).onclick = updatePo;
+    (document.getElementById("movePo") as HTMLElement).onclick = updatePo;
+    (document.getElementById("loadMove") as HTMLElement).onclick = loadMove;
+    (document.getElementById("contractAdj") as HTMLElement).onclick = contractAdjust;
+
+    // Accordions (expand / collapse)
+    qsa(".acc-head").forEach((h) => {
+      (h as HTMLElement).onclick = () => {
+        const acc = h.parentElement as HTMLElement;
+        toggleCls(acc, "open", acc.className.indexOf("open") === -1);
+      };
+    });
+
+    // Section Header toggle — show/hide the optional input
+    const sht = document.getElementById("secHeaderTgl") as HTMLInputElement;
+    const shi = document.getElementById("secHeader") as HTMLInputElement;
+    const syncSH = () => { shi.style.display = sht.checked ? "block" : "none"; if (!sht.checked) shi.value = ""; };
+    sht.onchange = syncSH;
+    syncSH();
+  }
+});
+
+function switchTab(name: string) {
+  qsa(".tab").forEach((t) => toggleCls(t, "active", (t as HTMLElement).getAttribute("data-tab") === name));
+  qsa(".tabpane").forEach((p) => toggleCls(p, "active", p.id === "tab-" + name));
+  hideStatus();
+  if (name === "po" && !poLoaded) { poLoaded = true; loadEst(); }
+}
+
+function hideStatus() {
+  const el = document.getElementById("status") as HTMLElement;
+  el.className = "status";
+  el.textContent = "";
+}
+
+async function loadMove() {
+  const source = (document.getElementById("poSource") as HTMLSelectElement).value.trim();
+  if (!source) { setStatus("Select a Source Contract first.", "err"); return; }
+  setStatus("Loading POs to move…", "busy"); setBusy(true);
+  try {
+    let rows: { vendor: string; poNum: string; amount: number; adj: number }[] = [];
+    await Excel.run(async (context) => { rows = await runLoadMove(context, source); });
+    const body = document.getElementById("poBody") as HTMLTableSectionElement;
+    body.innerHTML = "";
+    for (const r of rows) {
+      addPORow();
+      const tr = body.rows[body.rows.length - 1];
+      (tr.querySelector(".po-vendor") as HTMLInputElement).value = r.vendor;
+      (tr.querySelector(".po-num") as HTMLInputElement).value = r.poNum;
+      (tr.querySelector(".po-amt") as HTMLInputElement).value = r.amount ? String(r.amount) : "";
+      (tr.querySelector(".po-adj") as HTMLInputElement).value = r.adj ? String(r.adj) : "";
+    }
+    for (let i = 0; i < 2; i++) addPORow();
+    setStatus(`Loaded ${rows.length} PO(s). Tick the ones to move, choose a Target, then Run Move Po.`, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+async function contractAdjust() {
+  const poNumber = (document.getElementById("poSource") as HTMLSelectElement).value.trim();
+  const amtRaw = (document.getElementById("poAdjAmt") as HTMLInputElement).value.trim();
+  const desc = (document.getElementById("poAdjDesc") as HTMLInputElement).value.trim();
+  if (!poNumber) { setStatus("Select the Contract / PO Number (Source) first.", "err"); return; }
+  if (desc === "") { setStatus("Enter a Contract Description.", "err"); return; }
+  if (amtRaw === "" || isNaN(Number(amtRaw))) { setStatus("Enter a valid Contract Adjust amount.", "err"); return; }
+  setStatus("Applying contract adjustment…", "busy"); setBusy(true);
+  try {
+    await Excel.run(async (context) => { await runContractAdjust(context, poNumber, Number(amtRaw), desc); });
+    setStatus("Contract adjustment applied (saved as negative).", "ok");
+    (document.getElementById("poAdjAmt") as HTMLInputElement).value = "";
+    (document.getElementById("poAdjDesc") as HTMLInputElement).value = "";
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+function addItemRow() {
+  const body = document.getElementById("itemsBody") as HTMLTableSectionElement;
+  const n = body.rows.length + 1;
+  const tr = body.insertRow();
+  tr.innerHTML =
+    `<td class="numcol">${n}</td>` +
+    `<td><input class="desc" type="text" /></td>` +
+    `<td><input class="amt" type="number" step="any" /></td>`;
+  wireAutoGrow(tr, body, addItemRow);
+}
+
+// When the user types in the last row, append a fresh empty row automatically.
+function wireAutoGrow(tr: HTMLTableRowElement, body: HTMLTableSectionElement, addFn: () => void) {
+  const fields = Array.prototype.slice.call(tr.querySelectorAll("input[type=text], input[type=number]"));
+  for (let i = 0; i < fields.length; i++) {
+    (fields[i] as HTMLInputElement).oninput = () => {
+      if (tr !== body.rows[body.rows.length - 1]) return;
+      const has = fields.some((f: HTMLInputElement) => f.value.trim() !== "");
+      if (has) addFn();
+    };
+  }
+}
+
+function readForm(): InputFormData {
+  const val = (id: string) => (document.getElementById(id) as HTMLInputElement).value.trim();
+  const num = (id: string): number | "" => {
+    const v = val(id);
+    return v === "" || isNaN(Number(v)) ? "" : Number(v);
+  };
+
+  const dateStr = val("date");
+  let dateVal: number | "" = "";
+  if (dateStr !== "") dateVal = toExcelSerial(dateStr);
+
+  const items: Item[] = [];
+  qsa("#itemsBody tr").forEach((tr) => {
+    const desc = (tr.querySelector(".desc") as HTMLInputElement).value.trim();
+    if (desc === "") return;
+    const amtRaw = (tr.querySelector(".amt") as HTMLInputElement).value.trim();
+    const amt = amtRaw === "" || isNaN(Number(amtRaw)) ? 0 : Number(amtRaw);
+    items.push({ desc, amt, isHdr: amt === 0 });
+  });
+
+  return {
+    dateVal,
+    secType: val("secType"),
+    colName: val("colName"),
+    secHeader: val("secHeader"),
+    vtTotal: num("vtTotal"),
+    vtCost: num("vtCost"),
+    vtHours: num("vtHours"),
+    vtPO: val("vtPO"),
+    items,
+  };
+}
+
+function toExcelSerial(iso: string): number {
+  const d = new Date(iso + "T00:00:00Z");
+  const epoch = Date.UTC(1899, 11, 30);
+  return Math.round((d.getTime() - epoch) / 86400000);
+}
+
+function setStatus(msg: string, kind: "ok" | "err" | "busy") {
+  const el = document.getElementById("status") as HTMLElement;
+  el.className = "status " + kind;
+  if (kind === "busy") {
+    el.innerHTML = "";
+    const s = document.createElement("span");
+    s.className = "spin";
+    el.appendChild(s);
+    el.appendChild(document.createTextNode(msg));
+  } else {
+    el.textContent = msg;
+  }
+}
+
+// Disable/enable all run buttons while a script is running
+function setBusy(on: boolean) {
+  const btns = qsa(".btn");
+  for (let i = 0; i < btns.length; i++) (btns[i] as HTMLButtonElement).disabled = on;
+}
+
+function errMsg(e: unknown): string {
+  return e && (e as Error).message ? (e as Error).message : String(e);
+}
+
+function clearFormUI() {
+  ["date", "colName", "secHeader", "vtTotal", "vtCost", "vtHours", "vtPO"].forEach(
+    (id) => ((document.getElementById(id) as HTMLInputElement).value = "")
+  );
+  (document.getElementById("secType") as HTMLSelectElement).value = "";
+  (document.getElementById("itemsBody") as HTMLTableSectionElement).innerHTML = "";
+  for (let i = 0; i < 4; i++) addItemRow();
+}
+
+async function generate() {
+  const form = readForm();
+  if (!form.secType) { setStatus("Select a Section Type.", "err"); return; }
+  if (!form.colName) { setStatus("Enter a Column Name.", "err"); return; }
+  if (form.items.length === 0) { setStatus("Add at least one line item.", "err"); return; }
+
+  setStatus("Running Input Form…", "busy"); setBusy(true);
+  try {
+    let summary = "Done.";
+    await Excel.run(async (context) => { summary = await runInputForm(context, form); });
+    setStatus(summary, "ok");
+    clearFormUI();
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+async function updatePR() {
+  setStatus("Updating Vendor Tracking…", "busy"); setBusy(true);
+  try {
+    await Excel.run(async (context) => { await runUpdatePR(context); });
+    setStatus("Vendor Tracking updated — PR columns linked.", "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+async function invoiceGen() {
+  setStatus("Generating invoice…", "busy"); setBusy(true);
+  try {
+    let summary = "Invoice generated.";
+    await Excel.run(async (context) => { summary = await runInvoiceGenerate(context); });
+    setStatus(summary, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+async function getPR() {
+  setStatus("Loading lines…", "busy"); setBusy(true);
+  try {
+    let loaded: { desc: string; amt: number | "" }[] = [];
+    await Excel.run(async (context) => { loaded = await runGetPR(context); });
+
+    (document.getElementById("secType") as HTMLSelectElement).value = "Payment Request";
+    const body = document.getElementById("itemsBody") as HTMLTableSectionElement;
+    body.innerHTML = "";
+    for (const it of loaded) {
+      addItemRow();
+      const tr = body.rows[body.rows.length - 1];
+      (tr.querySelector(".desc") as HTMLInputElement).value = it.desc;
+      (tr.querySelector(".amt") as HTMLInputElement).value = it.amt === "" ? "" : String(it.amt);
+    }
+    for (let i = 0; i < 3; i++) addItemRow();
+    setStatus(`Loaded ${loaded.length} item(s). Edit amounts, set Column Name, then Run Input Form.`, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+// ───────────────────────── PO Management (panel) ─────────────────────────
+
+function addPORow() {
+  const body = document.getElementById("poBody") as HTMLTableSectionElement;
+  const tr = body.insertRow();
+  tr.innerHTML =
+    `<td class="chk"><input class="po-mark" type="checkbox" /></td>` +
+    `<td><input class="po-vendor" type="text" /></td>` +
+    `<td><input class="po-num" type="text" /></td>` +
+    `<td><input class="po-amt" type="number" step="any" /></td>` +
+    `<td><input class="po-adj" type="number" step="any" /></td>`;
+  wireAutoGrow(tr, body, addPORow);
+}
+
+function readPOForm(): { source: string; target: string; formData: (string | number)[][] } {
+  const source = (document.getElementById("poSource") as HTMLSelectElement).value.trim();
+  const target = (document.getElementById("poTarget") as HTMLSelectElement).value.trim();
+  const formData: (string | number)[][] = [];
+  qsa("#poBody tr").forEach((tr) => {
+    const mark = (tr.querySelector(".po-mark") as HTMLInputElement).checked ? "Y" : "";
+    const vendor = (tr.querySelector(".po-vendor") as HTMLInputElement).value.trim();
+    const num = (tr.querySelector(".po-num") as HTMLInputElement).value.trim();
+    const amt = (tr.querySelector(".po-amt") as HTMLInputElement).value.trim();
+    const adj = (tr.querySelector(".po-adj") as HTMLInputElement).value.trim();
+    formData.push([mark, vendor, num, amt === "" ? "" : Number(amt), adj === "" ? "" : Number(adj)]);
+  });
+  return { source, target, formData };
+}
+
+function fillContractSelect(id: string, contracts: string[], blankLabel: string) {
+  const sel = document.getElementById(id) as HTMLSelectElement;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const o0 = document.createElement("option");
+  o0.value = ""; o0.textContent = blankLabel; sel.appendChild(o0);
+  for (const c of contracts) {
+    const o = document.createElement("option");
+    o.value = c; o.textContent = c; sel.appendChild(o);
+  }
+  if (prev && contracts.includes(prev)) sel.value = prev;
+}
+
+async function loadEst() {
+  setStatus("Loading contracts…", "busy"); setBusy(true);
+  try {
+    let contracts: string[] = [];
+    await Excel.run(async (context) => { contracts = await runLoadEst(context); });
+    fillContractSelect("poSource", contracts, "-- select contract --");
+    fillContractSelect("poTarget", contracts, "-- none --");
+    setStatus(`Loaded ${contracts.length} contract(s).`, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+async function updatePo() {
+  const form = readPOForm();
+  if (!form.source) { setStatus("Select a Source Contract (run Load Est first).", "err"); return; }
+  setStatus("Saving POs…", "busy"); setBusy(true);
+  try {
+    let summary = "POs saved.";
+    await Excel.run(async (context) => { summary = await runUpdatePo(context, form); });
+    setStatus(summary, "ok");
+    (document.getElementById("poBody") as HTMLTableSectionElement).innerHTML = "";
+    for (let i = 0; i < 4; i++) addPORow();
+    (document.getElementById("poTarget") as HTMLSelectElement).value = "";
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+// ───────────────────────── helper ─────────────────────────
+
+async function readValues(context: Excel.RequestContext, range: Excel.Range): Promise<(string | number | boolean)[][]> {
+  range.load("values");
+  await context.sync();
+  return range.values as (string | number | boolean)[][];
+}
+
+// ───────────────────────── Main port (Run Input Form) ─────────────────────────
+
+async function runInputForm(context: Excel.RequestContext, form: InputFormData) {
+  const { dateVal, secType, colName, secHeader, vtTotal, vtCost, vtHours, vtPO, items } = form;
+
+  const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  wsInv.load("name");
+  await context.sync();
+  if (wsInv.isNullObject) throw new Error("'LDP & LCP - Invoice Worksheet' not found.");
+
+  let hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
+  let hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0];
+
+  let tdIdx = -1;
+  for (let c = 0; c < hdr2.length; c++) {
+    if (hdr2[c] && String(hdr2[c]).trim() === "Total To date") { tdIdx = c; break; }
+  }
+  if (tdIdx === -1) throw new Error("'Total To date' not found.");
+
+  let targetIdx = -1;
+  const isPR = secType === "Payment Request";
+
+  if (isPR) {
+    let paidS = -1;
+    for (let c = tdIdx + 1; c < hdr2.length; c++) {
+      if (hdr2[c] && String(hdr2[c]).trim() === "Paid to Date") { paidS = c; break; }
+    }
+    let insIdx = paidS !== -1 ? paidS : tdIdx + 1;
+    if (paidS !== -1) {
+      const prev = hdr3[paidS - 1] ? String(hdr3[paidS - 1]).trim().toUpperCase() : "";
+      if (prev.includes("TBB")) insIdx = paidS - 1;
+    }
+    wsInv.getRange(`${CL(insIdx)}:${CL(insIdx)}`).insert(Excel.InsertShiftDirection.right);
+    wsInv.getRange(`${CL(insIdx)}2`).values = [["Payment Request"]];
+    wsInv.getRange(`${CL(insIdx)}3`).values = [[colName]];
+    if (dateVal !== "") {
+      wsInv.getRange(`${CL(insIdx)}4`).values = [[dateVal]];
+      wsInv.getRange(`${CL(insIdx)}4`).numberFormat = [["m/d/yyyy"]];
+    }
+    await context.sync();
+    targetIdx = insIdx;
+  } else {
+    let found = -1;
+    for (let c = 2; c < tdIdx; c++) {
+      if (hdr3[c] && String(hdr3[c]).trim() === colName) { found = c; break; }
+    }
+    if (found !== -1) {
+      targetIdx = found;
+    } else {
+      let insIdx = tdIdx;
+      const prev = hdr3[tdIdx - 1] ? String(hdr3[tdIdx - 1]).trim().toUpperCase() : "";
+      if (prev.includes("TBB")) insIdx = tdIdx - 1;
+      wsInv.getRange(`${CL(insIdx)}:${CL(insIdx)}`).insert(Excel.InsertShiftDirection.right);
+      wsInv.getRange(`${CL(insIdx)}2`).values = [["Change Order"]];
+      wsInv.getRange(`${CL(insIdx)}3`).values = [[colName]];
+      if (dateVal !== "") {
+        wsInv.getRange(`${CL(insIdx)}4`).values = [[dateVal]];
+        wsInv.getRange(`${CL(insIdx)}4`).numberFormat = [["m/d/yyyy"]];
+      }
+      await context.sync();
+      targetIdx = insIdx;
+      tdIdx++;
+    }
+  }
+
+  hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
+  tdIdx = -1;
+  let paidIdx = -1, compIdx = -1, pctIdx = -1, balIdx = -1, firstPRIdx = -1, lastPRIdx = -1;
+  for (let c = 0; c < hdr2.length; c++) {
+    const h = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (h === "Total To date" && tdIdx === -1) tdIdx = c;
+    if (h === "Paid to Date" && paidIdx === -1) paidIdx = c;
+    if (h === "Completed to Date" && compIdx === -1) compIdx = c;
+    if (h.includes("% Completed") && pctIdx === -1) pctIdx = c;
+    if (h === "Balance to Finish" && balIdx === -1) balIdx = c;
+  }
+  for (let c = tdIdx + 1; c < (paidIdx !== -1 ? paidIdx : hdr2.length); c++) {
+    const h = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (h === "Payment Request" || h === "Deposit - LDP/LCP") {
+      if (firstPRIdx === -1) firstPRIdx = c;
+      lastPRIdx = c;
+    }
+  }
+  const tgtCol = CL(targetIdx);
+
+  let colA = await readValues(context, wsInv.getRange("A1:A100"));
+  let grandRow = -1, ldpSubRow = -1, lcpSubRow = -1, lcpHdrRow = -1;
+  for (let r = 4; r < 100; r++) {
+    const a = colA[r][0] ? String(colA[r][0]).trim() : "";
+    if (a === "Grand - TOTALS") grandRow = r + 1;
+    if (a === "SUB - TOTALS - LDP") ldpSubRow = r + 1;
+    if (a === "SUB - TOTALS - LCP") lcpSubRow = r + 1;
+    if (a === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
+  }
+  if (grandRow === -1) throw new Error("Grand Totals not found.");
+
+  if (isPR) {
+    for (const item of items) {
+      if (item.isHdr || item.amt === 0) continue;
+      let matched = false;
+      for (let r = 4; r < grandRow - 1; r++) {
+        if (colA[r][0] && String(colA[r][0]).trim() === item.desc) {
+          wsInv.getRange(`${tgtCol}${r + 1}`).values = [[item.amt]];
+          wsInv.getRange(`${tgtCol}${r + 1}`).numberFormat = [[FMT_ACCT]];
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        const insertRow = grandRow;
+        wsInv.getRange(`${insertRow}:${insertRow}`).insert(Excel.InsertShiftDirection.down);
+        wsInv.getRange(`A${insertRow}`).values = [[item.desc]];
+        wsInv.getRange(`A${insertRow}`).format.font.bold = false;
+        wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
+        wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
+        grandRow++;
+        colA = await readValues(context, wsInv.getRange("A1:A100"));
+      }
+    }
+    await updateAllFormulas(context, wsInv, grandRow, tdIdx, firstPRIdx, lastPRIdx, paidIdx, compIdx, pctIdx, balIdx, lcpHdrRow, ldpSubRow, lcpSubRow);
+    wsInv.activate();
+    await context.sync();
+    return `Payment Request '${colName}' applied (${items.length} item(s)).`;
+  }
+
+  interface BlockRow { text: string; bold: boolean; amt: number; }
+  const block: BlockRow[] = [];
+  const needLCPHdr = secType === "LCP" && lcpHdrRow === -1;
+
+  let insertAt: number;
+  if (secType === "LDP") {
+    const boundary = lcpHdrRow !== -1 ? lcpHdrRow : grandRow;
+    insertAt = 6;
+    for (let r = 5; r < boundary - 1; r++) {
+      const a = colA[r][0] ? String(colA[r][0]).trim() : "";
+      if (a !== "") insertAt = r + 2;
+    }
+    if (insertAt > boundary) insertAt = boundary;
+  } else {
+    insertAt = grandRow;
+  }
+
+  if (insertAt > 6) {
+    const prevRowIdx = insertAt - 2;
+    const prevVal = prevRowIdx >= 0 && prevRowIdx < colA.length
+      ? (colA[prevRowIdx][0] ? String(colA[prevRowIdx][0]).trim() : "")
+      : "";
+    if (prevVal !== "") block.push({ text: "", bold: false, amt: 0 });
+  }
+
+  if (needLCPHdr) block.push({ text: "LCP", bold: true, amt: 0 });
+  if (secHeader !== "") block.push({ text: secHeader, bold: true, amt: 0 });
+  for (const item of items) block.push({ text: item.desc, bold: item.isHdr, amt: item.amt });
+
+  const rowsNeeded = block.length;
+  const available = grandRow - insertAt;
+  if (rowsNeeded > available) {
+    const n = rowsNeeded - available;
+    wsInv.getRange(`${insertAt}:${insertAt + n - 1}`).insert(Excel.InsertShiftDirection.down);
+    grandRow += n;
+    if (ldpSubRow !== -1) ldpSubRow += n;
+    if (lcpSubRow !== -1) lcpSubRow += n;
+    if (lcpHdrRow !== -1 && lcpHdrRow >= insertAt) lcpHdrRow += n;
+    await context.sync();
+  }
+
+  for (let i = 0; i < block.length; i++) {
+    const row = insertAt + i;
+    const b = block[i];
+    if (b.text === "") continue;
+    wsInv.getRange(`A${row}`).values = [[b.text]];
+    wsInv.getRange(`A${row}`).format.font.bold = b.bold;
+    if (b.amt !== 0) {
+      wsInv.getRange(`${tgtCol}${row}`).values = [[b.amt]];
+      wsInv.getRange(`${tgtCol}${row}`).numberFormat = [[FMT_ACCT]];
+    }
+    if (b.text === "LCP" && b.bold && needLCPHdr) lcpHdrRow = row;
+  }
+  await context.sync();
+
+  // Save line-item descriptions into PR#TBB (LDP / LCP only) — descriptions only, appended
+  if (secType === "LDP" || secType === "LCP") {
+    await addDescriptionsToPRTBB(context, items);
+  }
+
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (!wsVT.isNullObject) {
+    await addVendorTrackingRow(context, wsVT, secType, secHeader, colName, vtTotal, vtCost, vtHours, vtPO);
+    await updateVTFormulas(context, wsVT);
+    await repairAllVendorTrackingFormulas(context, wsVT);
+    await loadPOContracts(context);
+  }
+
+  await updateAllFormulas(context, wsInv, grandRow, tdIdx, firstPRIdx, lastPRIdx, paidIdx, compIdx, pctIdx, balIdx, lcpHdrRow, ldpSubRow, lcpSubRow);
+  wsInv.activate();
+  await context.sync();
+  return `${secType} added → column ${tgtCol} (${colName}), ${items.length} item(s).`;
+}
+
+// ───────────────────────── PR#TBB descriptions ─────────────────────────
+
+async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item[]) {
+  const wsPR = context.workbook.worksheets.getItemOrNullObject("PR#TBB");
+  wsPR.load("name");
+  await context.sync();
+  if (wsPR.isNullObject) return;
+
+  let colA = await readValues(context, wsPR.getRange("A1:A60"));
+  let subTotalRow = -1;
+  for (let r = 0; r < colA.length; r++) {
+    const a = colA[r][0] ? String(colA[r][0]).trim().toUpperCase().replace(/\s+/g, "") : "";
+    if (a.startsWith("SUB-TOTAL")) { subTotalRow = r + 1; break; }
+  }
+  if (subTotalRow === -1) return;
+
+  const descStart = 7;
+  for (const item of items) {
+    const desc = item.desc ? String(item.desc).trim() : "";
+    if (desc === "") continue;
+
+    colA = await readValues(context, wsPR.getRange("A1:A60"));
+    let targetRow = -1;
+    for (let r = descStart - 1; r < subTotalRow - 1; r++) {
+      const v = colA[r] ? colA[r][0] : "";
+      if (v === "" || v === null) { targetRow = r + 1; break; }
+    }
+
+    if (targetRow === -1) {
+      targetRow = subTotalRow;
+      wsPR.getRange(`${targetRow}:${targetRow}`).insert(Excel.InsertShiftDirection.down);
+      wsPR.getRange(`A${targetRow}:D${targetRow}`).merge(false);
+      subTotalRow++;
+    }
+    wsPR.getRange(`A${targetRow}`).values = [[desc]];
+    wsPR.getRange(`A${targetRow}`).format.font.bold = item.isHdr;
+    await context.sync();
+  }
+}
+
+// ───────────────────────── Vendor Tracking ─────────────────────────
+
+async function addVendorTrackingRow(
+  context: Excel.RequestContext, ws: Excel.Worksheet,
+  secType: string, secHeader: string, colName: string,
+  vtTotal: number | "", vtCost: number | "", vtHours: number | "", vtPO: string
+) {
+  if (secType === "Payment Request") return;
+  const contractName = secHeader !== "" ? secHeader : colName;
+
+  const vtAE = await readValues(context, ws.getRange("A5:E80")); // A..E for rows 5..80
+  let lastDataRow = 6, clientTotalRow = -1, lcpAnalysisRow = -1, ldpMarkerRow = -1, lcpMarkerRow = -1;
+
+  for (let r = 0; r < vtAE.length; r++) {
+    const a = vtAE[r][0] ? String(vtAE[r][0]).trim() : "";
+    const rowNum = r + 5;
+    if (a === "LDP" && ldpMarkerRow === -1) ldpMarkerRow = rowNum;
+    if (a === "LCP" && lcpMarkerRow === -1) lcpMarkerRow = rowNum;
+    if (a.includes("LCP Analysis")) lcpAnalysisRow = rowNum;
+    if (a.includes("Client total") || a.includes("Client Total")) { clientTotalRow = rowNum; break; }
+    if (a !== "" && a !== "Contract" && !a.includes("Project Management") && !a.includes("Sub-Contractor")
+      && !a.includes("Percentage") && !a.includes("Gross Margin") && !a.includes("LCP Analysis")) {
+      lastDataRow = rowNum;
+    }
+  }
+
+  const rowEmpty = (rowNum: number): boolean => {
+    const r = rowNum - 5;
+    if (r < 0 || r >= vtAE.length) return true;
+    return vtAE[r].slice(0, 5).every((v) => v === "" || v === null);
+  };
+
+  let vtRow = -1;
+
+  if (secType === "LDP" || secType === "LCP") {
+    let sectionStart: number, sectionEnd: number;
+    if (secType === "LDP") {
+      sectionStart = ldpMarkerRow !== -1 ? ldpMarkerRow + 1 : 7;
+      sectionEnd = lcpMarkerRow !== -1 ? lcpMarkerRow
+        : (lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81));
+    } else {
+      sectionStart = lcpMarkerRow !== -1 ? lcpMarkerRow + 1 : 7;
+      sectionEnd = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
+    }
+    for (let row = sectionStart; row < sectionEnd; row++) {
+      if (rowEmpty(row)) { vtRow = row; break; }
+    }
+    if (vtRow === -1) {
+      vtRow = sectionEnd;
+      ws.getRange(`${vtRow}:${vtRow}`).insert(Excel.InsertShiftDirection.down);
+      await context.sync();
+    }
+  } else {
+    const stopRow = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
+    for (let row = 7; row < stopRow; row++) {
+      if (rowEmpty(row)) { vtRow = row; break; }
+    }
+    if (vtRow === -1) {
+      if (lcpAnalysisRow !== -1) {
+        vtRow = lcpAnalysisRow;
+        ws.getRange(`${lcpAnalysisRow}:${lcpAnalysisRow + 1}`).insert(Excel.InsertShiftDirection.down);
+      } else if (clientTotalRow !== -1) {
+        vtRow = clientTotalRow;
+        ws.getRange(`${clientTotalRow}:${clientTotalRow + 1}`).insert(Excel.InsertShiftDirection.down);
+      } else {
+        vtRow = lastDataRow + 2;
+      }
+      await context.sync();
+    }
+  }
+
+  ws.getRange(`A${vtRow}`).values = [[contractName]];
+  ws.getRange(`A${vtRow}:E${vtRow}`).format.font.bold = true;
+  if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
+  if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
+  if (vtHours !== "") { ws.getRange(`D${vtRow}`).values = [[vtHours]]; ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]]; }
+  if (vtPO !== "") { ws.getRange(`E${vtRow}`).values = [[vtPO]]; ws.getRange(`E${vtRow}`).numberFormat = [["@"]]; }
+  await context.sync();
+
+  const next = await readValues(context, ws.getRange(`A${vtRow + 1}:E${vtRow + 1}`));
+  const isNextRowEmpty = next[0].every((v) => v === "" || v === null);
+  if (!isNextRowEmpty) {
+    ws.getRange(`${vtRow + 1}:${vtRow + 1}`).insert(Excel.InsertShiftDirection.down);
+    await context.sync();
+  }
+}
+
+async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Worksheet) {
+  const vtA = await readValues(context, ws.getRange("A5:A30"));
+  let clientRow = -1, firstDataRow = -1, lastDataRow = -1;
+  for (let r = 0; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    if (a.includes("Client total") || a.includes("Client Total")) clientRow = r + 5;
+    if (a !== "" && a !== "Contract" && !a.includes("Client total") && !a.includes("Client Total")
+      && !a.includes("Project Management") && !a.includes("Sub-Contractor")
+      && !a.includes("Percentage") && !a.includes("Gross Margin")) {
+      if (firstDataRow === -1) firstDataRow = r + 5;
+      lastDataRow = r + 5;
+    }
+  }
+  if (clientRow !== -1 && firstDataRow !== -1 && lastDataRow !== -1) {
+    ws.getRange(`B${clientRow}`).formulas = [[`=SUM(B${firstDataRow}:B${lastDataRow})`]];
+    ws.getRange(`B${clientRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`C${clientRow}`).formulas = [[`=SUM(C${firstDataRow}:C${lastDataRow})`]];
+    ws.getRange(`C${clientRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`D${clientRow}`).formulas = [[`=SUM(D${firstDataRow}:D${lastDataRow})`]];
+    ws.getRange(`D${clientRow}`).numberFormat = [["0.00"]];
+    await context.sync();
+  }
+}
+
+async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
+  const headers = (await readValues(context, wsVT.getRange("A5:AD5")))[0];
+  let poTotalIdx = -1, ldpTotalIdx = -1, lcpTotalIdx = -1;
+  for (let c = 0; c < headers.length; c++) {
+    const h = headers[c] ? String(headers[c]).trim() : "";
+    if (h === "PO Total") poTotalIdx = c;
+    if (h === "LDP Total") ldpTotalIdx = c;
+    if (h === "LCP Total") lcpTotalIdx = c;
+  }
+  // LCP total column may simply be labeled "Total" (sits under "LCP Project", after LDP Total)
+  if (lcpTotalIdx === -1) {
+    for (let c = 0; c < headers.length; c++) {
+      const h = headers[c] ? String(headers[c]).trim() : "";
+      if (h === "Total" && c > ldpTotalIdx) { lcpTotalIdx = c; break; }
+    }
+  }
+  if (poTotalIdx === -1) return;
+
+  const poTotalCol = CL(poTotalIdx);
+  const ldpTotalCol = ldpTotalIdx !== -1 ? CL(ldpTotalIdx) : "";
+  const lcpTotalCol = lcpTotalIdx !== -1 ? CL(lcpTotalIdx) : "";
+
+  const rows = await readValues(context, wsVT.getRange("A6:E80")); // A..E
+  let section = "LDP"; // driven by bold "LDP"/"LCP" marker rows in column A
+  for (let i = 0; i < rows.length; i++) {
+    const row = i + 6;
+    const name = rows[i][0] ? String(rows[i][0]).trim() : "";
+
+    if (name === "LDP") { section = "LDP"; continue; }
+    if (name === "LCP") { section = "LCP"; continue; }
+    if (name.includes("Analysis") || name.includes("Client total") || name.includes("Client Total")) break;
+    if (name === "" || name.includes("Project Management") || name.includes("Sub-Contractor")
+      || name.includes("Percentage") || name.includes("Gross Margin")) continue;
+
+    const b = rows[i][1];
+    const e = rows[i][4];
+    const isMainContract = b !== "" && b !== null && Number(b) > 0;
+    const isVendorRow = e !== "" && e !== null && !isMainContract;
+    if (!isVendorRow) continue;
+
+    wsVT.getRange(`${poTotalCol}${row}`).formulas = [[`=SUM(F${row}:G${row})`]];
+    wsVT.getRange(`${poTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
+
+    if (section === "LCP" && lcpTotalCol && lcpTotalIdx > ldpTotalIdx) {
+      const firstLcpPrCol = CL(ldpTotalIdx + 1);
+      const lastLcpPrCol = CL(lcpTotalIdx - 1);
+      wsVT.getRange(`${lcpTotalCol}${row}`).formulas = [[`=${poTotalCol}${row}+SUM(${firstLcpPrCol}${row}:${lastLcpPrCol}${row})`]];
+      wsVT.getRange(`${lcpTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
+      if (ldpTotalCol) wsVT.getRange(`${ldpTotalCol}${row}`).values = [[""]];
+    } else if (ldpTotalCol && ldpTotalIdx > poTotalIdx) {
+      const firstLdpPrCol = CL(poTotalIdx + 1);
+      const lastLdpPrCol = CL(ldpTotalIdx - 1);
+      wsVT.getRange(`${ldpTotalCol}${row}`).formulas = [[`=${poTotalCol}${row}+SUM(${firstLdpPrCol}${row}:${lastLdpPrCol}${row})`]];
+      wsVT.getRange(`${ldpTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
+      if (lcpTotalCol) wsVT.getRange(`${lcpTotalCol}${row}`).values = [[""]];
+    }
+  }
+  await context.sync();
+}
+
+async function loadPOContracts(context: Excel.RequestContext) {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  const wsPO = context.workbook.worksheets.getItemOrNullObject("PO Input Form");
+  wsVT.load("name"); wsPO.load("name");
+  await context.sync();
+  if (wsVT.isNullObject || wsPO.isNullObject) return;
+
+  const vt = await readValues(context, wsVT.getRange("A7:E50")); // A,B,...,E
+  const contracts: string[] = [];
+  for (let r = 0; r < vt.length; r++) {
+    const a = vt[r][0] ? String(vt[r][0]).trim() : "";
+    const b = vt[r][1];
+    const e = vt[r][4] ? String(vt[r][4]).trim() : "";
+    if (a === "" || a.includes("Client total") || a.includes("Client Total") || a.includes("Project Management")
+      || a.includes("Sub-Contractor") || a.includes("Percentage") || a.includes("Gross Margin") || a === "Without Estimate") continue;
+    if (e !== "" && b !== "" && b !== null && Number(b) > 0) contracts.push(e);
+  }
+  contracts.push("Without Estimate");
+  const list = contracts.join(",");
+
+  for (const cell of ["B4", "C4"]) {
+    const dv = wsPO.getRange(cell).dataValidation;
+    dv.clear();
+    dv.rule = { list: { inCellDropDown: true, source: list } };
+  }
+  await context.sync();
+}
+
+// ───────────────────────── Invoice Worksheet formulas ─────────────────────────
+
+async function updateAllFormulas(
+  context: Excel.RequestContext, ws: Excel.Worksheet, grandRow: number,
+  tdIdx: number, firstPRIdx: number, lastPRIdx: number,
+  paidIdx: number, compIdx: number, pctIdx: number, balIdx: number,
+  lcpHdrRow: number, ldpSubRow: number, lcpSubRow: number
+) {
+  const tdCol = CL(tdIdx), lastCO = CL(tdIdx - 1);
+  const prS = firstPRIdx !== -1 ? CL(firstPRIdx) : "";
+  const prE = lastPRIdx !== -1 ? CL(lastPRIdx) : "";
+  const hCol = paidIdx !== -1 ? CL(paidIdx) : "";
+  const cCol = compIdx !== -1 ? CL(compIdx) : "";
+  const pCol = pctIdx !== -1 ? CL(pctIdx) : "";
+  const bCol = balIdx !== -1 ? CL(balIdx) : "";
+
+  const colA = await readValues(context, ws.getRange("A1:A100"));
+
+  for (let r = 5; r <= grandRow - 1; r++) {
+    const a = colA[r - 1][0] ? String(colA[r - 1][0]).trim() : "";
+    if (a === "" || a === "Grand - TOTALS" || a.startsWith("SUB - TOTALS")) continue;
+
+    ws.getRange(`${tdCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(B${r}:${lastCO}${r}<>""))=0,"",SUM(B${r}:${lastCO}${r}))`]];
+    ws.getRange(`${tdCol}${r}`).numberFormat = [[FMT_USD]];
+
+    if (hCol && prS) {
+      ws.getRange(`${hCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(${prS}${r}:${prE}${r}<>""))=0,"",SUM(${prS}${r}:${prE}${r})-${prE}${r})`]];
+      ws.getRange(`${hCol}${r}`).numberFormat = [[FMT_ACCT]];
+    }
+    if (cCol && prS) {
+      ws.getRange(`${cCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(${prS}${r}:${prE}${r}<>""))=0,"",SUM(${prS}${r}:${prE}${r}))`]];
+      ws.getRange(`${cCol}${r}`).numberFormat = [[FMT_ACCT]];
+    }
+    if (pCol) {
+      ws.getRange(`${pCol}${r}`).formulas = [[`=IFERROR(SUM(${cCol}${r}/${tdCol}${r}),"")`]];
+      ws.getRange(`${pCol}${r}`).numberFormat = [["0%"]];
+    }
+    if (bCol) {
+      ws.getRange(`${bCol}${r}`).formulas = [[`=IF(OR(${tdCol}${r}="",${cCol}${r}=""),"",${tdCol}${r}-${cCol}${r})`]];
+      ws.getRange(`${bCol}${r}`).numberFormat = [[FMT_USD]];
+    }
+  }
+
+  const dEnd = grandRow - 1;
+  let ldpEnd = dEnd;
+  if (lcpHdrRow !== -1) ldpEnd = lcpHdrRow - 1;
+
+  const hdr2 = (await readValues(context, ws.getRange("A2").getResizedRange(0, 51)))[0];
+  setTotalsRow(ws, hdr2, grandRow, 5, dEnd, tdIdx, compIdx, balIdx);
+  if (ldpSubRow !== -1) setTotalsRow(ws, hdr2, ldpSubRow, 5, ldpEnd, tdIdx, compIdx, balIdx);
+  if (lcpSubRow !== -1 && ldpSubRow !== -1) setLCPRow(ws, hdr2, lcpSubRow, grandRow, ldpSubRow, tdIdx, compIdx, balIdx);
+  await context.sync();
+}
+
+function setTotalsRow(ws: Excel.Worksheet, hdr2: (string | number | boolean)[], row: number, s: number, e: number,
+  tdIdx: number, compIdx: number, balIdx: number) {
+  const end = balIdx !== -1 ? balIdx : tdIdx;
+  for (let c = 1; c <= end; c++) {
+    const col = CL(c);
+    const hs = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (hs === "Total To date") {
+      ws.getRange(`${col}${row}`).formulas = [[`=SUM(B${row}:${CL(tdIdx - 1)}${row})`]];
+      ws.getRange(`${col}${row}`).numberFormat = [[FMT_USD]];
+    } else if (hs.includes("% Completed")) {
+      ws.getRange(`${col}${row}`).formulas = [[`=IFERROR(SUM(${CL(compIdx)}${row}/${CL(tdIdx)}${row}),0)`]];
+      ws.getRange(`${col}${row}`).numberFormat = [["0%"]];
+    } else if (hs === "Balance to Finish") {
+      ws.getRange(`${col}${row}`).formulas = [[`=IF(OR(${CL(tdIdx)}${row}="",${CL(compIdx)}${row}=""),"",${CL(tdIdx)}${row}-${CL(compIdx)}${row})`]];
+      ws.getRange(`${col}${row}`).numberFormat = [[FMT_USD]];
+    } else {
+      ws.getRange(`${col}${row}`).formulas = [[`=SUM(${col}${s}:${col}${e})`]];
+    }
+  }
+}
+
+function setLCPRow(ws: Excel.Worksheet, hdr2: (string | number | boolean)[], row: number, gr: number, lr: number,
+  tdIdx: number, compIdx: number, balIdx: number) {
+  const end = balIdx !== -1 ? balIdx : tdIdx;
+  for (let c = 1; c <= end; c++) {
+    const col = CL(c);
+    const hs = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (hs === "Total To date") {
+      ws.getRange(`${col}${row}`).formulas = [[`=SUM(B${row}:${CL(tdIdx - 1)}${row})`]];
+      ws.getRange(`${col}${row}`).numberFormat = [[FMT_USD]];
+    } else if (hs.includes("% Completed")) {
+      ws.getRange(`${col}${row}`).formulas = [[`=IFERROR(SUM(${CL(compIdx)}${row}/${CL(tdIdx)}${row}),0)`]];
+      ws.getRange(`${col}${row}`).numberFormat = [["0%"]];
+    } else if (hs === "Balance to Finish") {
+      ws.getRange(`${col}${row}`).formulas = [[`=IF(OR(${CL(tdIdx)}${row}="",${CL(compIdx)}${row}=""),"",${CL(tdIdx)}${row}-${CL(compIdx)}${row})`]];
+      ws.getRange(`${col}${row}`).numberFormat = [[FMT_USD]];
+    } else {
+      ws.getRange(`${col}${row}`).formulas = [[`=${col}${gr}-${col}${lr}`]];
+    }
+  }
+}
+
+// ───────────────────────── Run Update pr (Vendor Tracking) ─────────────────────────
+
+async function runUpdatePR(context: Excel.RequestContext) {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  wsVT.load("name"); wsInv.load("name");
+  await context.sync();
+  if (wsVT.isNullObject || wsInv.isNullObject) throw new Error("Sheet not found.");
+
+  const invH2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 30)))[0];
+  const invH3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 30)))[0];
+  let tdIdx = -1, paidIdx = -1;
+  for (let c = 0; c < invH2.length; c++) {
+    const h = invH2[c] ? String(invH2[c]).trim() : "";
+    if (h === "Total To date" && tdIdx === -1) tdIdx = c;
+    if (h === "Paid to Date" && paidIdx === -1) paidIdx = c;
+  }
+  if (tdIdx === -1) throw new Error("Total To date not found.");
+
+  const invA = await readValues(context, wsInv.getRange("A1:A100"));
+  let grandRow = -1, lcpHdrRow = -1;
+  for (let r = 4; r < 100; r++) {
+    const a = invA[r][0] ? String(invA[r][0]).trim() : "";
+    if (a === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
+    if (a === "Grand - TOTALS") { grandRow = r + 1; break; }
+  }
+  if (grandRow === -1) throw new Error("Grand Totals not found.");
+
+  const prEnd = paidIdx !== -1 ? paidIdx : 30;
+  const invPRs: { name: string; col: number; isLCP: boolean }[] = [];
+  if (prEnd > tdIdx + 1) {
+    const prBlock = await readValues(context, wsInv.getRange(`${CL(tdIdx + 1)}5:${CL(prEnd - 1)}${grandRow - 1}`));
+    for (let c = tdIdx + 1; c < prEnd; c++) {
+      const name = invH3[c] ? String(invH3[c]).trim() : "";
+      if (name === "") continue;
+      let hasLDP = false, hasLCP = false;
+      const colOff = c - (tdIdx + 1);
+      for (let r = 0; r < prBlock.length; r++) {
+        const v = prBlock[r][colOff];
+        if (v !== null && v !== "" && v !== 0) {
+          if (lcpHdrRow !== -1 && (r + 5) >= lcpHdrRow) hasLCP = true;
+          else hasLDP = true;
+        }
+      }
+      invPRs.push({ name, col: c, isLCP: hasLCP && !hasLDP });
+    }
+  }
+
+  const vtH = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+  let vtNotes = -1;
+  for (let c = 0; c < vtH.length; c++) { if (vtH[c] && String(vtH[c]).trim() === "Notes") vtNotes = c; }
+  const validEnd = vtNotes !== -1 ? vtNotes : 30;
+  const vtExist = new Set<string>();
+  for (let c = 8; c < validEnd; c++) {
+    const h = vtH[c] ? String(vtH[c]).trim() : "";
+    if (h !== "" && h !== "LDP Total" && h !== "LCP Total") vtExist.add(h);
+  }
+  const missing = invPRs.filter((p) => !vtExist.has(p.name));
+
+  const vtA = await readValues(context, wsVT.getRange("A5:A60"));
+  let clientRow = -1, subContRow = -1;
+  for (let r = 0; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    if (a.includes("Client total") || a.includes("Client Total")) clientRow = r + 5;
+    if (a.includes("Sub-Contractor Total")) subContRow = r + 5;
+  }
+
+  for (const pr of missing) {
+    const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+    let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
+    for (let c = 0; c < cur.length; c++) {
+      const h = cur[c] ? String(cur[c]).trim() : "";
+      if (h === "LDP Total") curLDPTot = c;
+      if (h.toUpperCase().includes("TBB")) curTBB = c;
+      if (h === "LCP Total") curLCPTot = c;
+    }
+    let insertAt = -1;
+    if (!pr.isLCP && curLDPTot !== -1) insertAt = curLDPTot;
+    else if (pr.isLCP && curTBB !== -1) insertAt = curTBB;
+    else if (pr.isLCP && curLCPTot !== -1) insertAt = curLCPTot;
+    else if (curLDPTot !== -1) insertAt = curLDPTot;
+    if (insertAt === -1) continue;
+    const col = CL(insertAt);
+    wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
+    wsVT.getRange(`${col}5`).values = [[pr.name]];
+    wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
+    wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
+    await context.sync();
+  }
+
+  const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+
+  for (const pr of invPRs) {
+    for (let c = 8; c < fin.length; c++) {
+      const h = fin[c] ? String(fin[c]).trim() : "";
+      if (h === pr.name) {
+        wsVT.getRange(`${CL(c)}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
+        wsVT.getRange(`${CL(c)}6`).numberFormat = [[FMT_ACCT]];
+        break;
+      }
+    }
+  }
+
+  let nLDPTot = -1, nLCPTot = -1, nTBB = -1;
+  const ldp: number[] = [], lcp: number[] = [];
+  for (let c = 0; c < fin.length; c++) {
+    const h = fin[c] ? String(fin[c]).trim() : "";
+    if (h === "LDP Total") nLDPTot = c;
+    if (h === "LCP Total") nLCPTot = c;
+    if (h.toUpperCase().includes("TBB")) nTBB = c;
+  }
+  for (let c = 8; c < fin.length; c++) {
+    const h = fin[c] ? String(fin[c]).trim() : "";
+    if (h === "" || h === "Notes") break;
+    if (h === "LDP Total" || h === "LCP Total" || h.toUpperCase().includes("TBB")) continue;
+    if (nLDPTot !== -1 && c < nLDPTot) ldp.push(c);
+    else if (nLDPTot !== -1 && c > nLDPTot) lcp.push(c);
+  }
+
+  const ldpFirst = ldp.length > 0 ? CL(ldp[0]) : "";
+  const ldpLast = nLDPTot !== -1 ? CL(nLDPTot - 1) : "";
+  const lcpFirst = nLDPTot !== -1 ? CL(nLDPTot + 1) : "";
+  const lcpLast = nLCPTot !== -1 ? CL(nLCPTot - 1) : "";
+
+  if (nLDPTot !== -1 && ldpFirst !== "" && ldpLast !== "") {
+    wsVT.getRange(`${CL(nLDPTot)}6`).formulas = [[`=SUM(${ldpFirst}6:${ldpLast}6)`]];
+    wsVT.getRange(`${CL(nLDPTot)}6`).numberFormat = [[FMT_ACCT]];
+  }
+  if (nLCPTot !== -1 && lcpFirst !== "" && lcpLast !== "") {
+    wsVT.getRange(`${CL(nLCPTot)}6`).formulas = [[`=SUM(${lcpFirst}6:${lcpLast}6)`]];
+    wsVT.getRange(`${CL(nLCPTot)}6`).numberFormat = [[FMT_ACCT]];
+  }
+
+  if (clientRow !== -1) {
+    for (const c of ldp) { wsVT.getRange(`${CL(c)}${clientRow}`).formulas = [[`=${CL(c)}6`]]; wsVT.getRange(`${CL(c)}${clientRow}`).numberFormat = [[FMT_ACCT]]; }
+    for (const c of lcp) { wsVT.getRange(`${CL(c)}${clientRow}`).formulas = [[`=${CL(c)}6`]]; wsVT.getRange(`${CL(c)}${clientRow}`).numberFormat = [[FMT_ACCT]]; }
+    if (nTBB !== -1) { wsVT.getRange(`${CL(nTBB)}${clientRow}`).formulas = [[`=${CL(nTBB)}6`]]; wsVT.getRange(`${CL(nTBB)}${clientRow}`).numberFormat = [[FMT_ACCT]]; }
+    if (nLDPTot !== -1 && ldpFirst !== "" && ldpLast !== "") {
+      wsVT.getRange(`${CL(nLDPTot)}${clientRow}`).formulas = [[`=SUM(${ldpFirst}${clientRow}:${ldpLast}${clientRow})`]];
+      wsVT.getRange(`${CL(nLDPTot)}${clientRow}`).numberFormat = [[FMT_ACCT]];
+    }
+    if (nLCPTot !== -1 && lcpFirst !== "" && lcpLast !== "") {
+      wsVT.getRange(`${CL(nLCPTot)}${clientRow}`).formulas = [[`=SUM(${lcpFirst}${clientRow}:${lcpLast}${clientRow})`]];
+      wsVT.getRange(`${CL(nLCPTot)}${clientRow}`).numberFormat = [[FMT_ACCT]];
+    }
+  }
+
+  if (subContRow !== -1) {
+    const end = clientRow !== -1 ? clientRow - 1 : subContRow - 1;
+    const all = [...ldp, ...lcp];
+    if (nLDPTot !== -1) all.push(nLDPTot);
+    if (nTBB !== -1) all.push(nTBB);
+    if (nLCPTot !== -1) all.push(nLCPTot);
+    for (const c of all) {
+      wsVT.getRange(`${CL(c)}${subContRow}`).formulas = [[`=SUM(${CL(c)}7:${CL(c)}${end})`]];
+      wsVT.getRange(`${CL(c)}${subContRow}`).numberFormat = [[FMT_ACCT]];
+    }
+  }
+  await context.sync();
+
+  // Vendor LDP/LCP totals
+  let nPO = -1;
+  for (let c = 0; c < fin.length; c++) { if (fin[c] && String(fin[c]).trim() === "PO Total") nPO = c; }
+  if (nPO !== -1) {
+    const po = CL(nPO);
+    const vtAr = await readValues(context, wsVT.getRange("A5:A60"));
+    const vtB = await readValues(context, wsVT.getRange("B5:B60"));
+    const ldpContracts: number[] = [], lcpContracts: number[] = [];
+    for (let r = 0; r < vtAr.length; r++) {
+      const a = vtAr[r][0] ? String(vtAr[r][0]).trim() : "";
+      const b = vtB[r][0];
+      if (a.includes("Client total") || a.includes("Client Total")) break;
+      if (b !== null && b !== "" && Number(b) > 0) {
+        if (a.toUpperCase().includes("LCP") || a.toUpperCase().includes("CO#") || a.toUpperCase().includes("CO #")) lcpContracts.push(r + 5);
+        else ldpContracts.push(r + 5);
+      }
+    }
+    const lastRow = clientRow !== -1 ? clientRow - 1 : 30;
+    const ldpRangeEnd = nLDPTot !== -1 ? CL(nLDPTot - 1) : "";
+    const lcpRangeStart = nLDPTot !== -1 ? CL(nLDPTot + 1) : "";
+    const lcpRangeEnd = nLCPTot !== -1 ? CL(nLCPTot - 1) : "";
+    const firstLDPCol = ldp.length > 0 ? CL(ldp[0]) : (nLDPTot !== -1 ? CL(nLDPTot - 1) : "");
+
+    const poVals = await readValues(context, wsVT.getRange(`${po}7:${po}${lastRow}`));
+    for (let row = 7; row <= lastRow; row++) {
+      const poVal = poVals[row - 7] ? poVals[row - 7][0] : "";
+      if (poVal === null || poVal === "" || poVal === 0) continue;
+      let nearestContract = -1;
+      for (const cr of [...ldpContracts, ...lcpContracts].sort((a2, b2) => a2 - b2)) { if (cr <= row) nearestContract = cr; }
+      const isLCP = lcpContracts.includes(nearestContract);
+      if (!isLCP && nLDPTot !== -1 && firstLDPCol !== "" && ldpRangeEnd !== "") {
+        wsVT.getRange(`${CL(nLDPTot)}${row}`).formulas = [[`=${po}${row}+SUM(${firstLDPCol}${row}:${ldpRangeEnd}${row})`]];
+        wsVT.getRange(`${CL(nLDPTot)}${row}`).numberFormat = [[FMT_ACCT]];
+      }
+      if (isLCP && nLCPTot !== -1 && lcpRangeStart !== "" && lcpRangeEnd !== "") {
+        wsVT.getRange(`${CL(nLCPTot)}${row}`).formulas = [[`=${po}${row}+SUM(${lcpRangeStart}${row}:${lcpRangeEnd}${row})`]];
+        wsVT.getRange(`${CL(nLCPTot)}${row}`).numberFormat = [[FMT_ACCT]];
+      }
+    }
+    await context.sync();
+  }
+
+  // Header colours / bold
+  let ldpClr = "#C6EFCE", lcpClr = "#FCE4D6";
+  let fLDP: Excel.RangeFill | undefined, fLCP: Excel.RangeFill | undefined;
+  if (nLDPTot !== -1) { fLDP = wsVT.getRange(`${CL(nLDPTot)}5`).format.fill; fLDP.load("color"); }
+  if (nLCPTot !== -1) { fLCP = wsVT.getRange(`${CL(nLCPTot)}5`).format.fill; fLCP.load("color"); }
+  await context.sync();
+  if (fLDP && fLDP.color) ldpClr = fLDP.color;
+  if (fLCP && fLCP.color) lcpClr = fLCP.color;
+
+  for (const c of ldp) { wsVT.getRange(`${CL(c)}5`).format.fill.color = ldpClr; wsVT.getRange(`${CL(c)}5`).format.font.bold = true; }
+  if (nLDPTot !== -1) { wsVT.getRange(`${CL(nLDPTot)}5`).format.fill.color = ldpClr; wsVT.getRange(`${CL(nLDPTot)}5`).format.font.bold = true; }
+  for (const c of lcp) { wsVT.getRange(`${CL(c)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(c)}5`).format.font.bold = true; }
+  if (nTBB !== -1) { wsVT.getRange(`${CL(nTBB)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(nTBB)}5`).format.font.bold = true; }
+  if (nLCPTot !== -1) { wsVT.getRange(`${CL(nLCPTot)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(nLCPTot)}5`).format.font.bold = true; }
+
+  wsVT.activate();
+  await context.sync();
+}
+
+// ───────────────────────── Get PR (load existing lines into the panel) ─────────────────────────
+
+async function runGetPR(context: Excel.RequestContext): Promise<{ desc: string; amt: number | "" }[]> {
+  const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  wsInv.load("name");
+  await context.sync();
+  if (wsInv.isNullObject) throw new Error("Invoice Worksheet not found.");
+
+  const hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
+  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0];
+  let tdIdx = -1, prTBBIdx = -1;
+  for (let c = 0; c < hdr2.length; c++) {
+    if (hdr2[c] && String(hdr2[c]).trim() === "Total To date" && tdIdx === -1) tdIdx = c;
+  }
+  for (let c = 0; c < hdr3.length; c++) {
+    if (hdr3[c] && String(hdr3[c]).trim().toUpperCase() === "PR#TBB") { prTBBIdx = c; break; }
+  }
+  if (tdIdx === -1) throw new Error("'Total To date' not found.");
+  if (prTBBIdx === -1) throw new Error("'PR#TBB' column not found.");
+
+  const colA = await readValues(context, wsInv.getRange("A1:A100"));
+  let grandRow = -1;
+  for (let r = 4; r < 100; r++) {
+    if (colA[r][0] && String(colA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; }
+  }
+  if (grandRow === -1) throw new Error("Grand Totals not found.");
+
+  const descR = await readValues(context, wsInv.getRange(`A5:A${grandRow - 1}`));
+  const prR = await readValues(context, wsInv.getRange(`${CL(prTBBIdx)}5:${CL(prTBBIdx)}${grandRow - 1}`));
+
+  const out: { desc: string; amt: number | "" }[] = [];
+  for (let i = 0; i < descR.length; i++) {
+    const d = descR[i][0] ? String(descR[i][0]).trim() : "";
+    if (d === "") continue;
+    let amt: number | "" = "";
+    const pv = prR[i] ? prR[i][0] : "";
+    if (pv !== "" && pv !== null) {
+      const n = Number(String(pv).replace(/\$/g, "").replace(/,/g, "").trim());
+      if (!isNaN(n) && n !== 0) amt = n;
+    }
+    out.push({ desc: d, amt });
+  }
+  return out;
+}
+
+// ───────────────────────── Run Invoice Generate ─────────────────────────
+
+async function runInvoiceGenerate(context: Excel.RequestContext) {
+  const sheets = context.workbook.worksheets;
+  const wsInv = sheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  const wsTBB = sheets.getItemOrNullObject("PR#TBB");
+  const wsPay = sheets.getItemOrNullObject("Payments");
+  wsInv.load("name"); wsTBB.load("name"); wsPay.load("name");
+  await context.sync();
+  if (wsInv.isNullObject || wsTBB.isNullObject) throw new Error("Sheet not found (Invoice Worksheet / PR#TBB).");
+  const hasPay = !wsPay.isNullObject;
+
+  // Find columns
+  const h2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 30)))[0];
+  const h3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 30)))[0];
+  let tdIdx = -1, paidIdx = -1, fPRIdx = -1, lPRIdx = -1, tbbIdx = -1;
+  for (let c = 0; c < h2.length; c++) {
+    const hh = h2[c] ? String(h2[c]).trim() : "";
+    const nm = h3[c] ? String(h3[c]).trim() : "";
+    if (hh === "Total To date" && tdIdx === -1) tdIdx = c;
+    if (hh === "Paid to Date" && paidIdx === -1) paidIdx = c;
+    if (hh === "Payment Request" || hh === "Deposit - LDP/LCP") { if (fPRIdx === -1) fPRIdx = c; lPRIdx = c; }
+    if (nm.toUpperCase().includes("TBB")) tbbIdx = c;
+  }
+  if (tdIdx === -1 || fPRIdx === -1) throw new Error("Columns not found.");
+
+  const prEnd = paidIdx !== -1 ? paidIdx : 30;
+  const allPRs: { name: string; col: number }[] = [];
+  for (let c = tdIdx + 1; c < prEnd; c++) {
+    const nm = h3[c] ? String(h3[c]).trim() : "";
+    if (nm !== "" && !nm.toUpperCase().includes("TBB")) allPRs.push({ name: nm, col: c });
+  }
+
+  // PRs without an existing tab
+  sheets.load("items/name");
+  await context.sync();
+  const existingNames = new Set(sheets.items.map((s) => s.name));
+  const toCreate = allPRs.filter((pr) => !existingNames.has(pr.name));
+
+  // Grand Totals
+  const invA = await readValues(context, wsInv.getRange("A1:A100"));
+  let grandRow = -1;
+  for (let r = 4; r < 100; r++) { if (invA[r][0] && String(invA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; } }
+  if (grandRow === -1) throw new Error("Grand Totals not found.");
+
+  // Bold detection (queue all font loads, one sync)
+  const boldFonts: Excel.RangeFont[] = [];
+  for (let r = 4; r < grandRow - 1; r++) {
+    const f = wsInv.getRange(`A${r + 1}`).format.font;
+    f.load("bold");
+    boldFonts.push(f);
+  }
+  await context.sync();
+
+  // Data rows + bold detection (preserve blank rows as gaps)
+  const dataRows: { desc: string; invRow: number; isBold: boolean; isBlank: boolean }[] = [];
+  let lastWasBlank = true;
+  for (let r = 4; r < grandRow - 1; r++) {
+    const a = invA[r][0] ? String(invA[r][0]).trim() : "";
+    if (a.startsWith("SUB - TOTALS") || a === "Grand - TOTALS") continue;
+    if (a === "") {
+      if (lastWasBlank) continue;
+      dataRows.push({ desc: "", invRow: r + 1, isBold: false, isBlank: true });
+      lastWasBlank = true;
+      continue;
+    }
+    const bold = !!boldFonts[r - 4].bold;
+    dataRows.push({ desc: a, invRow: r + 1, isBold: bold, isBlank: false });
+    lastWasBlank = false;
+  }
+  while (dataRows.length > 0 && dataRows[dataRows.length - 1].isBlank) dataRows.pop();
+  dataRows.unshift({ desc: "", invRow: -1, isBold: false, isBlank: true });
+  dataRows.push({ desc: "", invRow: -1, isBold: false, isBlank: true });
+
+  const inv = "'LDP & LCP - Invoice Worksheet'";
+  const tdCol = CL(tdIdx);
+  const fPR = CL(fPRIdx);
+  const tbbC = tbbIdx !== -1 ? CL(tbbIdx) : "";
+
+  // Template structure
+  const tbbA = await readValues(context, wsTBB.getRange("A1:A60"));
+  const tbbStart = 7;
+  let tbbSubRow = -1;
+  for (let r = 0; r < tbbA.length; r++) {
+    const a = tbbA[r][0] ? String(tbbA[r][0]).trim() : "";
+    if (a === "SUB - TOTALS" || a === "SUB-TOTALS") tbbSubRow = r + 1;
+  }
+  const tplRows = tbbSubRow !== -1 ? tbbSubRow - tbbStart : 10;
+  const needed = dataRows.length;
+
+  // Payments
+  const payments: { date: string | number | boolean; ptype: string; amount: number }[] = [];
+  if (hasPay) {
+    const pd = await readValues(context, wsPay.getRange("A2:C50"));
+    for (const r of pd) {
+      if (r[0] === null && (r[1] === null || r[1] === "") && (r[2] === null || r[2] === "")) break;
+      if (r[0] !== null && r[2] !== null && r[2] !== "") payments.push({ date: r[0], ptype: r[1] ? String(r[1]).trim() : "", amount: Number(r[2]) });
+    }
+  }
+
+  const fmt = FMT_ACCT;
+
+  // ───────── STEP 1: PR#TBB with formulas ─────────
+  if (tbbSubRow !== -1) {
+    for (let r = tbbStart; r < tbbSubRow; r++) wsTBB.getRange(`A${r}:M${r}`).values = [["", "", "", "", "", "", "", "", "", "", "", "", ""]];
+    await context.sync();
+  }
+
+  if (needed > tplRows && tbbSubRow !== -1) {
+    wsTBB.getRange(`${tbbSubRow}:${tbbSubRow + needed - tplRows - 1}`).insert(Excel.InsertShiftDirection.down);
+    await context.sync();
+  } else if (needed < tplRows && tbbSubRow !== -1) {
+    wsTBB.getRange(`${tbbStart + needed}:${tbbStart + tplRows - 1}`).delete(Excel.DeleteShiftDirection.up);
+    await context.sync();
+  }
+
+  const stRow = tbbStart + needed;
+  const lastD = stRow - 1;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const t = tbbStart + i;
+    const v = dataRows[i].invRow;
+
+    if (dataRows[i].isBlank) {
+      wsTBB.getRange(`A${t}:M${t}`).clear(Excel.ClearApplyTo.contents);
+      continue;
+    }
+
+    wsTBB.getRange(`A${t}:D${t}`).merge(false);
+    wsTBB.getRange(`A${t}`).values = [[dataRows[i].desc]];
+    wsTBB.getRange(`A${t}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    if (dataRows[i].isBold) wsTBB.getRange(`A${t}`).format.font.bold = true;
+
+    const edges = [Excel.BorderIndex.edgeTop, Excel.BorderIndex.edgeBottom, Excel.BorderIndex.edgeLeft, Excel.BorderIndex.edgeRight];
+    for (const ed of edges) wsTBB.getRange(`A${t}:M${t}`).format.borders.getItem(ed).style = Excel.BorderLineStyle.none;
+
+    wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+    wsTBB.getRange(`F${t}`).values = [[""]];
+    wsTBB.getRange(`G${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+
+    if (tbbIdx !== -1 && fPRIdx !== -1) {
+      if (tbbIdx === fPRIdx) {
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",0)`]];
+      } else {
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
+      }
+    }
+    wsTBB.getRange(`J${t}`).formulas = [[`=IF(${inv}!${tbbC}${v}="","",${inv}!${tbbC}${v})`]];
+    wsTBB.getRange(`K${t}`).formulas = [[`=IF(AND(I${t}="",J${t}=""),"",SUM(I${t},J${t}))`]];
+    wsTBB.getRange(`L${t}`).formulas = [[`=IFERROR(K${t}/G${t},"")`]];
+    wsTBB.getRange(`M${t}`).formulas = [[`=IF(OR(G${t}="",K${t}=""),"",G${t}-K${t})`]];
+  }
+  await context.sync();
+
+  wsTBB.getRange(`E${tbbStart}:G${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
+  wsTBB.getRange(`I${tbbStart}:K${lastD}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`L${tbbStart}:L${lastD}`).numberFormat = [["0%"]];
+  wsTBB.getRange(`M${tbbStart}:M${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
+  wsTBB.getRange(`J${tbbStart}:J${lastD}`).format.fill.color = "#FFFF00";
+
+  // SUB-TOTALS
+  wsTBB.getRange(`A${stRow}:D${stRow}`).merge(false);
+  wsTBB.getRange(`A${stRow}`).values = [["SUB - TOTALS"]];
+  wsTBB.getRange(`A${stRow}`).format.font.bold = true;
+  wsTBB.getRange(`A${stRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  wsTBB.getRange(`E${stRow}`).formulas = [[`=SUM(E${tbbStart}:E${lastD})`]];
+  wsTBB.getRange(`F${stRow}`).formulas = [[`=SUM(F${tbbStart}:F${lastD})`]];
+  wsTBB.getRange(`G${stRow}`).formulas = [[`=SUM(G${tbbStart}:G${lastD})`]];
+  wsTBB.getRange(`I${stRow}`).formulas = [[`=SUM(I${tbbStart}:I${lastD})`]];
+  wsTBB.getRange(`J${stRow}`).formulas = [[`=SUM(J${tbbStart}:J${lastD})`]];
+  wsTBB.getRange(`K${stRow}`).formulas = [[`=SUM(K${tbbStart}:K${lastD})`]];
+  wsTBB.getRange(`L${stRow}`).formulas = [[`=IFERROR(K${stRow}/G${stRow},0)`]];
+  wsTBB.getRange(`M${stRow}`).formulas = [[`=SUM(M${tbbStart}:M${lastD})`]];
+  await context.sync();
+
+  // Invoiced to Date + Payments
+  let tbbFullA = await readValues(context, wsTBB.getRange("A1:A80"));
+  let tbbFullG = await readValues(context, wsTBB.getRange("G1:G80"));
+  let existInvToDt = -1;
+  for (let r = 0; r < tbbFullA.length; r++) {
+    const a = tbbFullA[r][0] ? String(tbbFullA[r][0]).trim() : "";
+    if (a === "Invoiced to Date") existInvToDt = r + 1;
+  }
+  if (existInvToDt === -1) {
+    existInvToDt = stRow + 1;
+    wsTBB.getRange(`A${existInvToDt}`).values = [["Invoiced to Date"]];
+    wsTBB.getRange(`A${existInvToDt}`).format.font.bold = true;
+    await context.sync();
+  }
+
+  if (payments.length > 0) {
+    let g = await readValues(context, wsTBB.getRange("G1:G80"));
+    let curTotalPaid = -1;
+    for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { curTotalPaid = r + 1; break; } }
+    if (curTotalPaid !== -1) {
+      const existingPayRows = curTotalPaid - existInvToDt - 1;
+      if (existingPayRows > 0) {
+        wsTBB.getRange(`${existInvToDt + 1}:${curTotalPaid - 1}`).delete(Excel.DeleteShiftDirection.up);
+        await context.sync();
+      }
+    }
+    g = await readValues(context, wsTBB.getRange("G1:G80"));
+    let newTotalPaid = -1;
+    for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { newTotalPaid = r + 1; break; } }
+    if (newTotalPaid !== -1) {
+      const totalInsert = payments.length + 1;
+      const insertAt = newTotalPaid;
+      wsTBB.getRange(`${insertAt}:${insertAt + totalInsert - 1}`).insert(Excel.InsertShiftDirection.down);
+      wsTBB.getRange(`A${insertAt}:M${insertAt + totalInsert - 1}`).clear(Excel.ClearApplyTo.formats);
+      for (let i = 0; i < payments.length; i++) {
+        const r = insertAt + 1 + i;
+        wsTBB.getRange(`G${r}`).values = [[payments[i].date]];
+        wsTBB.getRange(`G${r}`).numberFormat = [["mm/dd/yyyy"]];
+        wsTBB.getRange(`H${r}`).values = [[payments[i].ptype]];
+        wsTBB.getRange(`I${r}`).values = [[payments[i].amount]];
+        wsTBB.getRange(`I${r}`).numberFormat = [[fmt]];
+      }
+      const finalTpRow = newTotalPaid + totalInsert;
+      const firstPayRow = insertAt + 1;
+      const lastPayRow = finalTpRow - 1;
+      wsTBB.getRange(`I${finalTpRow}`).formulas = [[`=I${stRow}+SUM(I${firstPayRow}:I${lastPayRow})`]];
+      wsTBB.getRange(`I${finalTpRow}`).numberFormat = [[fmt]];
+      wsTBB.getRange(`G${finalTpRow}:M${finalTpRow}`).format.borders.getItem(Excel.BorderIndex.edgeTop).style = Excel.BorderLineStyle.continuous;
+      await context.sync();
+    }
+  } else {
+    const g = await readValues(context, wsTBB.getRange("G1:G80"));
+    for (let r = 0; r < g.length; r++) {
+      if (g[r][0] && String(g[r][0]).includes("Total Paid")) {
+        wsTBB.getRange(`I${r + 1}`).formulas = [[`=I${stRow}`]];
+        wsTBB.getRange(`I${r + 1}`).numberFormat = [[fmt]];
+        wsTBB.getRange(`G${r + 1}:M${r + 1}`).format.borders.getItem(Excel.BorderIndex.edgeTop).style = Excel.BorderLineStyle.continuous;
+        break;
+      }
+    }
+    await context.sync();
+  }
+
+  // ───────── STEP 2: static invoice tabs ─────────
+  // Batch read invoice columns used for static values
+  const invTd = await readValues(context, wsInv.getRange(`${tdCol}5:${tdCol}${grandRow - 1}`));
+
+  for (const pr of toCreate) {
+    const existing = sheets.getItemOrNullObject(pr.name);
+    existing.load("name");
+    await context.sync();
+    if (!existing.isNullObject) { existing.delete(); await context.sync(); }
+
+    const ws = wsTBB.copy(Excel.WorksheetPositionType.end);
+    ws.name = pr.name;
+    await context.sync();
+
+    ws.getRange("M3").values = [[pr.name]];
+    const prDate = (await readValues(context, wsInv.getRange(`${CL(pr.col)}4`)))[0][0];
+    ws.getRange("M2").values = [[prDate as string | number | boolean]];
+
+    const prVals = await readValues(context, wsInv.getRange(`${CL(pr.col)}5:${CL(pr.col)}${grandRow - 1}`));
+
+    // PR columns before this one
+    const prsBefore: number[] = [];
+    for (let c = fPRIdx; c < pr.col; c++) {
+      const nm = h3[c] ? String(h3[c]).trim() : "";
+      if (nm !== "" && !nm.toUpperCase().includes("TBB")) prsBefore.push(c);
+    }
+    let beforeBlock: (string | number | boolean)[][] = [];
+    if (pr.col > fPRIdx) beforeBlock = await readValues(context, wsInv.getRange(`${CL(fPRIdx)}5:${CL(pr.col - 1)}${grandRow - 1}`));
+
+    for (let i = 0; i < dataRows.length; i++) {
+      if (dataRows[i].isBlank) continue;
+      const t = tbbStart + i;
+      const idx = dataRows[i].invRow - 5;
+
+      const jRaw = prVals[idx] ? prVals[idx][0] : "";
+      const jVal: number | "" = jRaw !== "" && jRaw !== null && jRaw !== 0 ? Number(jRaw) : "";
+
+      let paidSum = 0;
+      for (const pc of prsBefore) {
+        const off = pc - fPRIdx;
+        const val = beforeBlock[idx] ? beforeBlock[idx][off] : "";
+        if (val !== null && val !== "" && !isNaN(Number(val))) paidSum += Number(val);
+      }
+
+      const gRaw = invTd[idx] ? invTd[idx][0] : "";
+      const gNum = gRaw !== null && gRaw !== "" ? Number(gRaw) : 0;
+
+      ws.getRange(`E${t}`).values = [[gNum === 0 ? "" : gNum]];
+      ws.getRange(`F${t}`).values = [[""]];
+      ws.getRange(`G${t}`).values = [[gNum === 0 ? "" : gNum]];
+      ws.getRange(`J${t}`).values = [[jVal === "" ? "" : jVal]];
+
+      if (gNum === 0) {
+        ws.getRange(`I${t}`).values = [[""]];
+        ws.getRange(`K${t}`).values = [[""]];
+        ws.getRange(`L${t}`).values = [[""]];
+        ws.getRange(`M${t}`).values = [[""]];
+      } else {
+        const jNum = jVal === "" ? 0 : jVal;
+        const kNum = paidSum + jNum;
+        ws.getRange(`I${t}`).values = [[paidSum > 0 ? paidSum : ""]];
+        ws.getRange(`K${t}`).values = [[kNum > 0 ? kNum : ""]];
+        ws.getRange(`L${t}`).values = [[kNum > 0 ? kNum / gNum : ""]];
+        ws.getRange(`M${t}`).values = [[gNum - kNum]];
+      }
+    }
+    await context.sync();
+
+    // Freeze SUB-TOTALS + footer (read recomputed values, write back static)
+    const subCells = ["E", "F", "G", "I", "J", "K", "L", "M"];
+    const subProxies: { c: string; r: Excel.Range }[] = [];
+    for (const c of subCells) { const rng = ws.getRange(`${c}${stRow}`); rng.load("values"); subProxies.push({ c, r: rng }); }
+    const gColCopy = ws.getRange("G1:G60"); gColCopy.load("values");
+    await context.sync();
+
+    for (const p of subProxies) {
+      const val = p.r.values[0][0];
+      ws.getRange(`${p.c}${stRow}`).values = [[val !== null ? val : 0]];
+    }
+
+    let copyTpRow = -1;
+    const gvals = gColCopy.values;
+    for (let r = 0; r < gvals.length; r++) { if (gvals[r][0] && String(gvals[r][0]).includes("Total Paid")) { copyTpRow = r + 1; break; } }
+    if (copyTpRow !== -1) {
+      const foot = ws.getRange(`I${copyTpRow}:M${copyTpRow + 2}`);
+      foot.load("values");
+      await context.sync();
+      const iv = foot.values[0][0];
+      ws.getRange(`I${copyTpRow}`).values = [[iv !== null ? iv : 0]];
+      const mv = foot.values[0][4];
+      ws.getRange(`M${copyTpRow}`).values = [[mv !== null ? mv : 0]];
+      const m1 = foot.values[1] ? foot.values[1][4] : 0;
+      ws.getRange(`M${copyTpRow + 1}`).values = [[m1 !== null ? m1 : 0]];
+      const m2 = foot.values[2] ? foot.values[2][4] : 0;
+      ws.getRange(`M${copyTpRow + 2}`).values = [[m2 !== null ? m2 : 0]];
+    }
+    await context.sync();
+  }
+
+  wsTBB.activate();
+  await context.sync();
+  return `PR#TBB updated · ${toCreate.length} new invoice tab(s) created.`;
+}
+
+// ───────────────────────── Load Est (read contracts for the dropdowns) ─────────────────────────
+
+async function runLoadEst(context: Excel.RequestContext): Promise<string[]> {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
+
+  const vtA = await readValues(context, wsVT.getRange("A7:A50"));
+  const vtB = await readValues(context, wsVT.getRange("B7:B50"));
+  const vtE = await readValues(context, wsVT.getRange("E7:E50"));
+
+  const contracts: string[] = [];
+  for (let r = 0; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    const b = vtB[r][0];
+    const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
+    if (a === "" || a.includes("Client total") || a.includes("Client Total") || a.includes("Project Management")
+      || a.includes("Sub-Contractor") || a.includes("Percentage") || a.includes("Gross Margin") || a === "Without Estimate") continue;
+    if (e !== "" && b !== "" && b !== null && Number(b) > 0) contracts.push(e);
+  }
+  contracts.push("Without Estimate");
+  return contracts;
+}
+
+// ───────────────────────── Update PO (Add / Update / Move) ─────────────────────────
+
+async function runUpdatePo(context: Excel.RequestContext, form: { source: string; target: string; formData: (string | number)[][] }) {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
+
+  const source = form.source.trim();
+  const target = form.target.trim();
+  const formData = form.formData;
+
+  let hasYMarks = false;
+  for (const r of formData) { if (r[0] && String(r[0]).trim().toUpperCase() === "Y") { hasYMarks = true; break; } }
+
+  let action = "added";
+  if (hasYMarks && target !== "" && target !== source) { await poDoMove(context, wsVT, source, target, formData); action = "moved"; }
+  else if (hasYMarks) { await poDoUpdate(context, wsVT, source, formData); action = "updated"; }
+  else { await poDoAdd(context, wsVT, source, formData); action = "added"; }
+
+  await repairAllVendorTrackingFormulas(context, wsVT);
+  await updateClientTotal(context, wsVT);
+  wsVT.activate();
+  await context.sync();
+  return `POs ${action} · vendor tracking updated.`;
+}
+
+async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, contract: string, formData: (string | number)[][]) {
+  const entries: { vendor: string; poNum: string; amount: number; adj: number }[] = [];
+  for (const r of formData) {
+    const vendor = r[1] ? String(r[1]).trim() : "";
+    if (vendor === "") continue;
+    entries.push({
+      vendor,
+      poNum: r[2] ? String(r[2]).trim() : "",
+      amount: r[3] !== null && r[3] !== "" && !isNaN(Number(r[3])) ? Number(r[3]) : 0,
+      adj: r[4] !== null && r[4] !== "" && !isNaN(Number(r[4])) ? Number(r[4]) : 0,
+    });
+  }
+  if (entries.length === 0) throw new Error("No PO rows entered.");
+
+  const contractRow = await poFindContractRow(context, wsVT, contract);
+  if (contractRow === -1) throw new Error(`Contract '${contract}' not found.`);
+
+  const insertAt = (await poFindInsertAfter(context, wsVT, contractRow)) + 1;
+  wsVT.getRange(`${insertAt}:${insertAt + entries.length - 1}`).insert(Excel.InsertShiftDirection.down);
+  await context.sync();
+
+  for (let i = 0; i < entries.length; i++) {
+    const row = insertAt + i;
+    const e = entries[i];
+    wsVT.getRange(`A${row}`).values = [[e.vendor]];
+    wsVT.getRange(`A${row}`).format.font.bold = false;
+    if (e.poNum) wsVT.getRange(`E${row}`).values = [[e.poNum]];
+    wsVT.getRange(`F${row}`).values = [[e.amount]]; wsVT.getRange(`F${row}`).numberFormat = [[FMT_ACCT]];
+    if (e.adj !== 0) { wsVT.getRange(`G${row}`).values = [[e.adj]]; wsVT.getRange(`G${row}`).numberFormat = [[FMT_ACCT]]; }
+    wsVT.getRange(`H${row}`).formulas = [[`=SUM(F${row}:G${row})`]]; wsVT.getRange(`H${row}`).numberFormat = [[FMT_ACCT]];
+  }
+  await context.sync();
+}
+
+async function poDoUpdate(context: Excel.RequestContext, wsVT: Excel.Worksheet, contract: string, formData: (string | number)[][]) {
+  const contractRow = await poFindContractRow(context, wsVT, contract);
+  if (contractRow === -1) throw new Error(`Contract '${contract}' not found.`);
+
+  for (const r of formData) {
+    const mark = r[0] ? String(r[0]).trim().toUpperCase() : "";
+    const vendor = r[1] ? String(r[1]).trim() : "";
+    if (vendor === "") continue;
+    if (mark !== "Y") continue;
+    const poNum = r[2] ? String(r[2]).trim() : "";
+    const amount = r[3] !== null && r[3] !== "" && !isNaN(Number(r[3])) ? Number(r[3]) : 0;
+    const adj = r[4] !== null && r[4] !== "" && !isNaN(Number(r[4])) ? Number(r[4]) : 0;
+    const vendorRow = await poFindVendorRow(context, wsVT, contractRow, vendor);
+    if (vendorRow === -1) continue;
+    if (poNum) wsVT.getRange(`E${vendorRow}`).values = [[poNum]];
+    wsVT.getRange(`F${vendorRow}`).values = [[amount]]; wsVT.getRange(`F${vendorRow}`).numberFormat = [[FMT_ACCT]];
+    wsVT.getRange(`G${vendorRow}`).values = [[adj]]; wsVT.getRange(`G${vendorRow}`).numberFormat = [[FMT_ACCT]];
+    wsVT.getRange(`H${vendorRow}`).formulas = [[`=SUM(F${vendorRow}:G${vendorRow})`]]; wsVT.getRange(`H${vendorRow}`).numberFormat = [[FMT_ACCT]];
+    await context.sync();
+  }
+}
+
+async function poDoMove(context: Excel.RequestContext, wsVT: Excel.Worksheet, source: string, target: string, formData: (string | number)[][]) {
+  const vendorsToMove: string[] = [];
+  for (const r of formData) {
+    const mark = r[0] ? String(r[0]).trim().toUpperCase() : "";
+    const vendor = r[1] ? String(r[1]).trim() : "";
+    if (vendor === "") continue;
+    if (mark === "Y") vendorsToMove.push(vendor);
+  }
+  if (vendorsToMove.length === 0) throw new Error("No PO rows ticked to move.");
+
+  for (let v = vendorsToMove.length - 1; v >= 0; v--) {
+    const name = vendorsToMove[v];
+    const srcRow = await poFindContractRow(context, wsVT, source);
+    if (srcRow === -1) continue;
+    const vRow = await poFindVendorRow(context, wsVT, srcRow, name);
+    if (vRow === -1) continue;
+    const rowData = (await readValues(context, wsVT.getRange(`A${vRow}:H${vRow}`)))[0];
+    wsVT.getRange(`${vRow}:${vRow}`).delete(Excel.DeleteShiftDirection.up);
+    await context.sync();
+    const tgtRow = await poFindContractRow(context, wsVT, target);
+    if (tgtRow === -1) continue;
+    const insertAt = (await poFindInsertAfter(context, wsVT, tgtRow)) + 1;
+    wsVT.getRange(`${insertAt}:${insertAt}`).insert(Excel.InsertShiftDirection.down);
+    await context.sync();
+    const cols = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    for (let c = 0; c < rowData.length; c++) {
+      if (rowData[c] !== null && rowData[c] !== "") wsVT.getRange(`${cols[c]}${insertAt}`).values = [[rowData[c]]];
+    }
+    wsVT.getRange(`H${insertAt}`).formulas = [[`=SUM(F${insertAt}:G${insertAt})`]];
+    wsVT.getRange(`H${insertAt}`).numberFormat = [[FMT_ACCT]];
+    await context.sync();
+  }
+}
+
+async function updateClientTotal(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
+  const vtA = await readValues(context, wsVT.getRange("A5:A60"));
+  let clientRow = -1, firstData = -1, lastData = -1;
+  for (let r = 0; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    if (a.includes("Client total") || a.includes("Client Total")) { clientRow = r + 5; break; }
+    if (a !== "" && a !== "Contract" && !a.includes("Without Estimate") && !a.includes("Project Management")
+      && !a.includes("Sub-Contractor") && !a.includes("Percentage") && !a.includes("Gross Margin")) {
+      if (firstData === -1) firstData = r + 5;
+      lastData = r + 5;
+    }
+  }
+  if (clientRow !== -1 && firstData !== -1) {
+    wsVT.getRange(`B${clientRow}`).formulas = [[`=SUMPRODUCT((B${firstData}:B${lastData}<>"")*1,B${firstData}:B${lastData})`]];
+    wsVT.getRange(`C${clientRow}`).formulas = [[`=SUMPRODUCT((C${firstData}:C${lastData}<>"")*1,C${firstData}:C${lastData})`]];
+    wsVT.getRange(`D${clientRow}`).formulas = [[`=SUMPRODUCT((D${firstData}:D${lastData}<>"")*1,D${firstData}:D${lastData})`]];
+    await context.sync();
+  }
+}
+
+async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksheet, contract: string): Promise<number> {
+  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtE = await readValues(context, ws.getRange("E5:E80"));
+  if (contract === "Without Estimate") {
+    for (let r = 0; r < vtA.length; r++) { if (vtA[r][0] && String(vtA[r][0]).trim() === "Without Estimate") return r + 5; }
+    return -1;
+  }
+  for (let r = 0; r < vtE.length; r++) { if (vtE[r][0] && String(vtE[r][0]).trim() === contract) return r + 5; }
+  return -1;
+}
+
+async function poFindInsertAfter(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number): Promise<number> {
+  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtE = await readValues(context, ws.getRange("E5:E80"));
+  let lastRow = contractRow;
+  for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
+    if (a === "" && e === "") break;
+    if (a.includes("Client total")) break;
+    lastRow = r + 5;
+  }
+  return lastRow;
+}
+
+async function poFindVendorRow(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number, vendorName: string): Promise<number> {
+  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    if (a === "" && r > contractRow - 5 + 2) break;
+    if (a.includes("Client total")) break;
+    if (a === vendorName) return r + 5;
+  }
+  return -1;
+}
+
+// ───────────────────────── Load Po to Move (read a contract's POs into the panel) ─────────────────────────
+
+async function runLoadMove(context: Excel.RequestContext, source: string): Promise<{ vendor: string; poNum: string; amount: number; adj: number }[]> {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
+
+  const vtA = await readValues(context, wsVT.getRange("A5:A80"));
+  const vtE = await readValues(context, wsVT.getRange("E5:E80"));
+  const fg = await readValues(context, wsVT.getRange("F5:G80")); // F=amount, G=adj
+
+  let srcRow = -1;
+  if (source === "Without Estimate" || source === "Unknown") {
+    for (let r = 0; r < vtA.length; r++) {
+      const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+      if (a === source || a === "Without Estimate") { srcRow = r + 5; break; }
+    }
+  } else {
+    for (let r = 0; r < vtE.length; r++) {
+      const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
+      if (e === source) { srcRow = r + 5; break; }
+    }
+  }
+  if (srcRow === -1) throw new Error(`'${source}' not found.`);
+
+  const out: { vendor: string; poNum: string; amount: number; adj: number }[] = [];
+  const startIdx = srcRow - 5 + 1;
+  for (let r = startIdx; r < vtA.length; r++) {
+    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
+    if (a === "" && e === "") break;
+    if (a.includes("Client total") || a.includes("Client Total")) break;
+    const f = fg[r] ? fg[r][0] : "";
+    const g = fg[r] ? fg[r][1] : "";
+    out.push({ vendor: a, poNum: e, amount: f ? Number(f) : 0, adj: g ? Number(g) : 0 });
+  }
+  return out;
+}
+
+// ───────────────────────── Contract Adjustment (negative adjustment row) ─────────────────────────
+
+async function runContractAdjust(context: Excel.RequestContext, poNumber: string, adjustment: number, description: string) {
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
+
+  const finalAmount = -Math.abs(adjustment);
+
+  const vtE = await readValues(context, wsVT.getRange("E5:E100"));
+  let poRow = -1;
+  for (let r = 0; r < vtE.length; r++) {
+    const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
+    if (e === poNumber) { poRow = r + 5; break; }
+  }
+  if (poRow === -1) throw new Error(`PO '${poNumber}' not found.`);
+
+  const targetRow = poRow + 1;
+  const nextCost = (await readValues(context, wsVT.getRange(`C${targetRow}`)))[0][0];
+  if (nextCost === "" || nextCost === null) {
+    wsVT.getRange(`${targetRow}:${targetRow}`).insert(Excel.InsertShiftDirection.down);
+    await context.sync();
+  }
+
+  wsVT.getRange(`A${targetRow}:E${targetRow}`).format.font.bold = false;
+  wsVT.getRange(`A${targetRow}`).values = [[description]];
+  wsVT.getRange(`B${targetRow}`).clear(Excel.ClearApplyTo.contents);
+  wsVT.getRange(`C${targetRow}`).values = [[finalAmount]];
+  wsVT.getRange(`C${targetRow}`).numberFormat = [[FMT_ACCT]];
+  wsVT.getRange(`D${targetRow}`).clear(Excel.ClearApplyTo.contents);
+  wsVT.getRange(`E${targetRow}`).clear(Excel.ClearApplyTo.contents);
+  await context.sync();
+
+  await updateClientTotal(context, wsVT);
+  wsVT.activate();
+  await context.sync();
+}

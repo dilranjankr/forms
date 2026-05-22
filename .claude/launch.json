@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "uitest",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5055", "--directory", "uitest"],
+      "port": 5055
+    }
+  ]
+}

@@ -1,0 +1,200 @@
+<!-- Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. -->
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kiser Invoice Tools</title>
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
+      body { font-family: "Segoe UI", Tahoma, sans-serif; color: #2a2a2a; background: #fff; font-size: 13px; }
+      #sideload-msg { padding: 28px; color: #6b7682; text-align: center; }
+      main { padding: 0; }
+
+      /* Tabs */
+      .tabs { display: -ms-flexbox; display: flex; background: #eef1ee; }
+      .tab { -ms-flex: 1 1 0px; flex: 1 1 0px; padding: 10px 8px; cursor: pointer; border: none; background: none; color: #5a6b60; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; }
+      .tab.active { background: #fff; color: #1f5130; border-bottom-color: #1f8a4d; }
+
+      .tabpane { display: none; padding: 0 14px 24px; }
+      .tabpane.active { display: block; }
+
+      /* Dark-green header banner */
+      .banner { background: #1f5130; color: #fff; font-size: 14.5px; font-weight: 700; letter-spacing: .3px; padding: 13px 14px; margin: 0 -14px 4px; }
+      .banner.po { background: #21306e; }
+
+      /* Section band */
+      .sband { background: #e2efe0; color: #1f5130; font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; padding: 7px 10px; border-radius: 2px; margin: 16px 0 12px; }
+      .sband.po { background: #d3d6f0; color: #21306e; }
+
+      /* Fields */
+      .grp { margin-bottom: 12px; }
+      .grp > label { display: block; font-size: 12.5px; font-weight: 600; color: #2a2a2a; margin-bottom: 5px; }
+      .opt { font-weight: 400; color: #8c8c70; font-size: 11px; }
+      .lblrow { display: -ms-flexbox; display: flex; -ms-flex-align: center; align-items: center; -ms-flex-pack: justify; justify-content: space-between; margin-bottom: 5px; }
+      .lblrow label { margin-bottom: 0; }
+      .grp input, .grp select { display: block; width: 100%; padding: 9px 10px; font-size: 13px; color: #2a2a2a; border: 1px solid #d8d4a8; border-radius: 2px; background: #fffdf0; }
+      .grp input:focus, .grp select:focus { outline: none; border-color: #1f8a4d; box-shadow: 0 0 0 2px #d9ecdd; background: #fff; }
+      .vt input { background: #eef0fa; border-color: #cfd5ee; }
+
+      /* Toggle */
+      .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+      .switch input { opacity: 0; width: 0; height: 0; margin: 0; }
+      .switch .slider { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #c7cdc9; border-radius: 22px; cursor: pointer; }
+      .switch .slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+      .switch input:checked + .slider { background: #1f8a4d; }
+      .switch input:checked + .slider:before { left: 21px; }
+
+      /* Line-items table */
+      table { width: 100%; border-collapse: collapse; font-size: 12.5px; border: 1px solid #d8d4a8; }
+      th { background: #ededed; color: #444; font-weight: 700; padding: 7px 8px; text-align: left; font-size: 11px; border: 1px solid #d8d8d8; }
+      td { padding: 0; border: 1px solid #e6e3c4; }
+      td input { width: 100%; border: none; padding: 8px; font-size: 12.5px; background: #fffdf0; color: #2a2a2a; }
+      td input:focus { outline: none; background: #fffce0; }
+      th.numcol, td.numcol { width: 26px; text-align: center; color: #888; background: #f5f5f0; }
+      th.chk, td.chk { width: 32px; text-align: center; }
+
+      /* Buttons */
+      .btn { display: block; width: 100%; padding: 11px; font-size: 13px; font-weight: 700; color: #fff; background: #1f8a4d; border: none; border-radius: 2px; cursor: pointer; margin-top: 8px; }
+      .btn:hover { background: #186e3e; }
+      .btn-sec { background: #2f6e47; }
+      .btn-sec:hover { background: #245539; }
+      .btn-orange { background: #e07b2e; }
+      .btn-orange:hover { background: #c96a22; }
+      .btn-teal { background: #157a66; }
+      .btn-teal:hover { background: #11604f; }
+      .btn:disabled { opacity: .55; cursor: default; }
+      .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; vertical-align: -1px; margin-right: 6px; -webkit-animation: sp .7s linear infinite; animation: sp .7s linear infinite; }
+      @-webkit-keyframes sp { to { -webkit-transform: rotate(360deg); } }
+      @keyframes sp { to { transform: rotate(360deg); } }
+      .btn-add { display: inline-block; width: auto; padding: 6px 12px; font-size: 12px; color: #444; background: #eaeaea; font-weight: 600; margin-top: 10px; }
+      .btn-add:hover { background: #ddd; }
+
+      /* Help box */
+      .help { background: #fffde0; border: 1px solid #ecdf9a; border-radius: 2px; padding: 11px 12px; font-size: 11.5px; color: #5a5320; line-height: 1.55; margin-top: 16px; }
+      .help b { color: #3f3a14; }
+
+      /* Status */
+      .status { margin: 12px 0 0; font-size: 12.5px; padding: 10px 12px; border-radius: 2px; white-space: pre-wrap; display: none; line-height: 1.45; }
+      .status.ok { display: block; background: #e3f4e8; color: #1e7e34; border: 1px solid #bfe2cb; }
+      .status.err { display: block; background: #fdeceb; color: #c0392b; border: 1px solid #f3c6c2; }
+      .status.busy { display: block; background: #eef4f0; color: #1f5130; border: 1px solid #cfe0d5; }
+    </style>
+</head>
+
+<body>
+    <section id="sideload-msg">Loading the add-in…</section>
+
+    <main id="app-body" style="display: none;">
+
+        <div class="tabs">
+            <button class="tab active" data-tab="invoice">Invoice Form</button>
+            <button class="tab" data-tab="po">PO Form</button>
+        </div>
+
+        <!-- ───────── INVOICE FORM ───────── -->
+        <div id="tab-invoice" class="tabpane active">
+            <div class="banner">LDP / LCP / CO / PR — INPUT FORM</div>
+
+            <div class="sband">Section Setup</div>
+            <div class="grp">
+                <label>Section Type</label>
+                <select id="secType">
+                    <option value="">-- select --</option>
+                    <option value="LDP">LDP</option>
+                    <option value="LCP">LCP</option>
+                    <option value="Change Order">Change Order</option>
+                    <option value="Payment Request">Payment Request</option>
+                </select>
+            </div>
+            <div class="grp"><label>Column Name (Row 3)</label><input type="text" id="colName" placeholder="e.g. LDP / PR#1 / CO#1" /></div>
+            <div class="grp"><label>Date</label><input type="date" id="date" /></div>
+            <div class="grp">
+                <div class="lblrow">
+                    <label>Section Header <span class="opt">(optional, bold row)</span></label>
+                    <label class="switch"><input type="checkbox" id="secHeaderTgl" checked /><span class="slider"></span></label>
+                </div>
+                <input type="text" id="secHeader" placeholder="bold header row" />
+            </div>
+
+            <div class="sband">Vendor Tracking <span class="opt">(only first LDP/LCP run)</span></div>
+            <div class="vt">
+                <div class="grp"><label>Contract Total</label><input type="number" id="vtTotal" step="any" /></div>
+                <div class="grp"><label>Contract Cost</label><input type="number" id="vtCost" step="any" /></div>
+                <div class="grp"><label>Management Hours</label><input type="number" id="vtHours" step="any" /></div>
+                <div class="grp"><label>EST Number</label><input type="text" id="vtPO" /></div>
+            </div>
+
+            <div class="sband">Line Items <span class="opt">(no amount = bold sub-header)</span></div>
+            <table>
+                <thead><tr><th class="numcol">#</th><th>Description</th><th>Amount ($)</th></tr></thead>
+                <tbody id="itemsBody"></tbody>
+            </table>
+            <button id="addRow" class="btn-add">+ Add row</button>
+
+            <div class="sband">Run</div>
+            <button id="getPR" class="btn btn-orange">Get PR (load lines)</button>
+            <button id="generate" class="btn">Run Input Form</button>
+            <button id="updatePR" class="btn btn-sec">Run Update pr (Vendor Tracking)</button>
+            <button id="invoiceGen" class="btn btn-teal">Run Invoice Generate</button>
+
+            <div class="help">
+                <b>HOW TO USE</b><br>
+                1. Pick Section Type &amp; Column Name, set the Date.<br>
+                2. Add line items (no amount = bold sub-header).<br>
+                3. Vendor Tracking only for a new LDP/LCP contract.<br>
+                <b>Payment Request:</b> click <b>Get PR</b> first to load lines &amp; PR#TBB amounts, edit, then <b>Run Input Form</b>. Each PR makes a new column.
+            </div>
+        </div>
+
+        <!-- ───────── PO FORM ───────── -->
+        <div id="tab-po" class="tabpane">
+            <div class="banner po">PO MANAGEMENT — INPUT FORM</div>
+
+            <div class="sband po">Setup</div>
+            <div class="grp">
+                <label>Contract (Source)</label>
+                <select id="poSource"><option value="">-- load contracts --</option></select>
+            </div>
+            <div class="grp">
+                <label>Target Contract <span class="opt">(for Move)</span></label>
+                <select id="poTarget"><option value="">-- none --</option></select>
+            </div>
+            <div class="grp"><label>Contract Adjust <span class="opt">($, for Contract Adjust)</span></label><input type="number" id="poAdjAmt" step="any" /></div>
+            <div class="grp"><label>Contract Description</label><input type="text" id="poAdjDesc" /></div>
+
+            <div class="sband po">Purchase Orders <span class="opt">(tick = update/move · untick = add)</span></div>
+            <table>
+                <thead><tr><th class="chk">✓</th><th>Vendor Name</th><th>PO Number</th><th>PO Amount ($)</th><th>PO Adj. ($)</th></tr></thead>
+                <tbody id="poBody"></tbody>
+            </table>
+            <button id="addPORow" class="btn-add">+ Add row</button>
+
+            <div class="sband po">Run</div>
+            <button id="loadEst" class="btn btn-orange">Run Load Est</button>
+            <button id="updatePo" class="btn">Run Update Po</button>
+            <button id="loadMove" class="btn btn-orange">Run Load Po to Move</button>
+            <button id="movePo" class="btn">Run Move Po</button>
+            <button id="contractAdj" class="btn">Run Contract Adjust</button>
+
+            <div class="help">
+                <b>HOW TO USE</b><br>
+                <b>Add POs:</b> select Source contract, fill PO rows, then Run Update Po.<br>
+                <b>Move POs:</b> select Source + Target, tick rows to move, then Run Move Po.
+            </div>
+            <div class="help">
+                <b>ADD PO ADJUSTMENTS</b><br>
+                Select the PO, enter a Contract Adjust amount + Description, then Run Contract Adjust. Adjustment amounts are always saved as negative.
+            </div>
+        </div>
+
+        <div id="status" class="status"></div>
+    </main>
+</body>
+
+</html>
