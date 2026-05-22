@@ -1631,7 +1631,7 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
     const row = insertAt + i;
     const e = entries[i];
     wsVT.getRange(`A${row}`).values = [[e.vendor]];
-    wsVT.getRange(`A${row}`).format.font.bold = false;
+    wsVT.getRange(`A${row}:H${row}`).format.font.bold = false; // vendor row must be normal, not bold (inherited from contract header)
     if (e.poNum) wsVT.getRange(`E${row}`).values = [[e.poNum]];
     wsVT.getRange(`F${row}`).values = [[e.amount]]; wsVT.getRange(`F${row}`).numberFormat = [[FMT_ACCT]];
     if (e.adj !== 0) { wsVT.getRange(`G${row}`).values = [[e.adj]]; wsVT.getRange(`G${row}`).numberFormat = [[FMT_ACCT]]; }
@@ -1686,6 +1686,7 @@ async function poDoMove(context: Excel.RequestContext, wsVT: Excel.Worksheet, so
     const insertAt = (await poFindInsertAfter(context, wsVT, tgtRow)) + 1;
     wsVT.getRange(`${insertAt}:${insertAt}`).insert(Excel.InsertShiftDirection.down);
     await context.sync();
+    wsVT.getRange(`A${insertAt}:H${insertAt}`).format.font.bold = false; // moved vendor row must not be bold
     const cols = ["A", "B", "C", "D", "E", "F", "G", "H"];
     for (let c = 0; c < rowData.length; c++) {
       if (rowData[c] !== null && rowData[c] !== "") wsVT.getRange(`${cols[c]}${insertAt}`).values = [[rowData[c]]];
