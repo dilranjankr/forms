@@ -1030,13 +1030,13 @@ async function runUpdatePR(context: Excel.RequestContext) {
     // formulas + formatting carry over (like a manual copy-paste before PR#TBB).
     if (curTBB !== -1) {
       const srcCol = CL(insertAt + 1);
-      wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
+      // Wipe ALL formatting from the new blank column first (it inherited the LDP-Total
+      // yellow from its left neighbour). clear(formats) removes fill + borders + font +
+      // conditional formats — much stronger than just fill.clear().
+      wsVT.getRange(`${col}1:${col}100`).clear(Excel.ClearApplyTo.formats);
       await context.sync();
-      // Remove ALL highlight on the new PR column — plain fill AND conditional formatting
-      // (the inserted column inherits the LDP-Total highlight; clear both to be safe).
-      const newCol = wsVT.getRange(`${col}1:${col}100`);
-      newCol.format.fill.clear();
-      newCol.conditionalFormats.clearAll();
+      // Now clone PR#TBB's formulas + formats into the clean column
+      wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
       await context.sync();
     }
     wsVT.getRange(`${col}5`).values = [[pr.name]];
