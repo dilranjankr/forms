@@ -1026,19 +1026,11 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const col = CL(insertAt);
     wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
     await context.sync();
-    // Copy the PR#TBB column (now shifted one to the right) into the new column so its
-    // formulas + formatting carry over (like a manual copy-paste before PR#TBB).
-    if (curTBB !== -1) {
-      const srcCol = CL(insertAt + 1);
-      // Wipe ALL formatting from the new blank column first (it inherited the LDP-Total
-      // yellow from its left neighbour). clear(formats) removes fill + borders + font +
-      // conditional formats — much stronger than just fill.clear().
-      wsVT.getRange(`${col}1:${col}100`).clear(Excel.ClearApplyTo.formats);
-      await context.sync();
-      // Now clone PR#TBB's formulas + formats into the clean column
-      wsVT.getRange(`${col}:${col}`).copyFrom(`${srcCol}:${srcCol}`, Excel.RangeCopyType.all);
-      await context.sync();
-    }
+    // Clean slate — drop ALL inherited content + formatting so we don't carry the left
+    // neighbour's % formulas, yellow fill, "% Completed" label, etc. Then set just the
+    // header and the row-6 link formula. Later steps (LCP Total / Client / Sub-contractor
+    // / colours) fill in everything else correctly for this new column.
+    wsVT.getRange(`${col}1:${col}100`).clear(Excel.ClearApplyTo.all);
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
