@@ -23,7 +23,9 @@
     "start": "office-addin-debugging start manifest.xml",
     "stop": "office-addin-debugging stop manifest.xml",
     "validate": "office-addin-manifest validate manifest.xml",
-    "watch": "webpack --mode development --watch"
+    "watch": "webpack --mode development --watch",
+    "guide:docx": "node scripts/make-install-guide.js",
+    "guide:pdf": "node scripts/make-install-guide.js && powershell -ExecutionPolicy Bypass -File scripts/docx-to-pdf.ps1 -Src Install_Guide_Kiser_Invoice_Tools.docx -Dst Install_Guide_Kiser_Invoice_Tools.pdf"
   },
   "dependencies": {
     "core-js": "^3.36.0",

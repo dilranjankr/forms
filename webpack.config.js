@@ -77,6 +77,10 @@ module.exports = async (env, options) => {
               }
             },
           },
+          {
+            from: "src/static",
+            to: "[name][ext]",
+          },
         ],
       }),
       new HtmlWebpackPlugin({

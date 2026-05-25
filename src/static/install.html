@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Download manifest.prod.xml — LDP and LCP form</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1c2733;
+      background: linear-gradient(180deg, #f7f9f6 0%, #ffffff 100%);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      max-width: 560px; width: 100%;
+      background: #ffffff;
+      border: 1px solid #d8dce0;
+      border-top: 6px solid #1f5130;
+      border-radius: 10px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.06);
+      padding: 36px 32px;
+      text-align: center;
+    }
+    .logo {
+      display: inline-block;
+      width: 72px; height: 72px;
+      background: #1f5130;
+      color: #fff;
+      font-weight: 700;
+      font-size: 36px;
+      line-height: 72px;
+      border-radius: 14px;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0 0 8px 0; font-size: 24px; color: #1f5130; }
+    p  { margin: 8px 0; font-size: 15px; color: #1c2733; line-height: 1.5; }
+    .muted { color: #6b7682; font-size: 13px; }
+    .btn {
+      display: inline-block;
+      margin-top: 16px;
+      background: #1f5130;
+      color: #ffffff !important;
+      text-decoration: none;
+      font-weight: 700;
+      padding: 14px 28px;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    .btn:hover { background: #13402a; }
+    .step {
+      margin-top: 20px;
+      text-align: left;
+      background: #f5f6f8;
+      border-left: 4px solid #1f5130;
+      padding: 12px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+      color: #1c2733;
+    }
+    .step b { color: #1f5130; }
+    .footer { margin-top: 22px; font-size: 12px; color: #6b7682; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">K</div>
+    <h1>Downloading manifest.prod.xml…</h1>
+    <p class="muted">Your download should start automatically.</p>
+
+    <a id="dl" class="btn" href="manifest.prod.xml" download="manifest.prod.xml">
+      Click here if it didn't start
+    </a>
+
+    <div class="step">
+      Save the file (you can put it anywhere — Desktop or Downloads is fine), then go back to the install guide and continue from <b>Step 1</b>.
+    </div>
+
+    <div class="footer">LDP and LCP form  •  Excel Add-in</div>
+  </div>
+
+  <script>
+    // Auto-trigger the download once the page is in view.
+    (function () {
+      try {
+        var a = document.createElement("a");
+        a.href = "manifest.prod.xml";
+        a.download = "manifest.prod.xml";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { a.parentNode && a.parentNode.removeChild(a); }, 1500);
+      } catch (e) { /* fallback: user clicks the big button */ }
+    })();
+  </script>
+</body>
+</html>
