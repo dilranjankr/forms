@@ -1026,11 +1026,12 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const col = CL(insertAt);
     wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
     await context.sync();
-    // Clean slate — drop ALL inherited content + formatting so we don't carry the left
-    // neighbour's % formulas, yellow fill, "% Completed" label, etc. Then set just the
-    // header and the row-6 link formula. Later steps (LCP Total / Client / Sub-contractor
-    // / colours) fill in everything else correctly for this new column.
-    wsVT.getRange(`${col}1:${col}100`).clear(Excel.ClearApplyTo.all);
+    // Drop the bad inherited stuff (formulas / values / yellow fill / conditional formats)
+    // but KEEP borders / font / number-format so the column still looks bordered.
+    const newCol = wsVT.getRange(`${col}1:${col}100`);
+    newCol.clear(Excel.ClearApplyTo.contents);
+    newCol.format.fill.clear();
+    newCol.conditionalFormats.clearAll();
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
