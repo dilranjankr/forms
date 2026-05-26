@@ -4,7 +4,7 @@
   <Version>1.0.0.0</Version>
   <ProviderName>Ed Ball Landscape Architecture</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Kiser Invoice Tools"/>
+  <DisplayName DefaultValue="Project Update"/>
   <Description DefaultValue="Progressive invoicing for LDP / LCP / LMP projects — add sections, payment requests, vendor tracking and generate invoices, right inside Excel."/>
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
@@ -72,13 +72,13 @@
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="Kiser Invoice Tools — ready!"/>
-        <bt:String id="CommandsGroup.Label" DefaultValue="Kiser Invoice Tools"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="Kiser Invoice Tools"/>
+        <bt:String id="GetStarted.Title" DefaultValue="Project Update — ready!"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="Project Update"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Project Update"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="Kiser Invoice Tools is loaded. Open the panel from Home tab → Kiser Invoice Tools to add LDP/LCP sections, create Payment Requests, manage POs, and generate invoices."/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open the Kiser Invoice Tools panel"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Project Update is loaded. Open the panel from Home tab → Project Update to add LDP/LCP sections, create Payment Requests, manage POs, and generate invoices."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Open the Project Update panel"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

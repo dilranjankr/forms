@@ -343,10 +343,10 @@ const stepsChildren = [
     "Upload Add-in dialog"
   ),
   ...stepCard(
-    5, "Click Kiser Invoice Tools",
-    "A new Kiser Invoice Tools button (green K) appears on the Home tab. Click it — the panel opens on the right side of Excel.",
+    5, "Click Project Update",
+    "A new Project Update button (green K) appears on the Home tab. Click it — the panel opens on the right side of Excel.",
     null,
-    "Kiser Invoice Tools button"
+    "Project Update button"
   ),
   new Paragraph({ children: [new PageBreak()] }),
 ];
