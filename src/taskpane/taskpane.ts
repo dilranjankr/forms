@@ -374,6 +374,31 @@ async function loadEst() {
   } finally { setBusy(false); }
 }
 
+// In-page Yes/No modal for duplicate POs. `window.confirm` is silently
+// ignored inside the Office Add-in webview, so we render our own.
+function showDupeModal(dupes: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("dupeModal") as HTMLElement;
+    const list = document.getElementById("dupeList") as HTMLElement;
+    const yes = document.getElementById("dupeYes") as HTMLElement;
+    const no = document.getElementById("dupeNo") as HTMLElement;
+    list.innerHTML = "";
+    for (const p of dupes) {
+      const li = document.createElement("li");
+      li.textContent = p;
+      list.appendChild(li);
+    }
+    const cleanup = () => {
+      modal.style.display = "none";
+      yes.onclick = null;
+      no.onclick = null;
+    };
+    yes.onclick = () => { cleanup(); resolve(true); };
+    no.onclick = () => { cleanup(); resolve(false); };
+    modal.style.display = "";
+  });
+}
+
 async function updatePo() {
   const form = readPOForm();
   if (!form.source) { setStatus("Select a Source Contract (run Load Est first).", "err"); return; }
@@ -401,13 +426,28 @@ async function updatePo() {
     hideStatus();
 
     if (dupes.length > 0) {
-      const list = dupes.map((p) => `  • ${p}`).join("\n");
-      const proceed = window.confirm(
-        `Ye PO number(s) workbook me pehle se save h:\n\n${list}\n\nKya aap fir bhi add karna chahte hain?`
-      );
+      const proceed = await showDupeModal(dupes);
       if (!proceed) {
-        setStatus("Add cancelled — duplicate PO number(s) detected.", "err");
-        return;
+        // User chose "No, Skip" — drop only the duplicate rows, keep unique ones.
+        const dupeSet: { [k: string]: boolean } = {};
+        for (const d of dupes) dupeSet[d.toUpperCase()] = true;
+        const beforeCount = form.formData.length;
+        form.formData = form.formData.filter((r) => {
+          const pn = r[2] ? String(r[2]).trim().toUpperCase() : "";
+          return !pn || !dupeSet[pn];
+        });
+        const skipped = beforeCount - form.formData.length;
+        // Check if any non-empty rows remain
+        let remaining = 0;
+        for (const r of form.formData) {
+          const vendor = r[1] ? String(r[1]).trim() : "";
+          if (vendor !== "") remaining++;
+        }
+        if (remaining === 0) {
+          setStatus(`All ${skipped} row(s) were duplicates — nothing added.`, "err");
+          return;
+        }
+        setStatus(`Skipped ${skipped} duplicate row(s). Saving the rest…`, "busy");
       }
     }
   }
@@ -1027,7 +1067,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
           else hasLDP = true;
         }
       }
-      invPRs.push({ name, col: c, isLCP: hasLCP && !hasLDP });
+      // Mirror EVERY PR that has any data (LDP, LCP, or mixed) into Vendor Tracking.
+      // The earlier "LCP-only" gating was too strict and caused PRs with any LDP line
+      // to silently skip the VT mirror.
+      invPRs.push({ name, col: c, isLCP: hasLCP || hasLDP });
     }
   }
 
@@ -1040,7 +1083,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const h = vtH[c] ? String(vtH[c]).trim() : "";
     if (h !== "" && h !== "LDP Total" && h !== "LCP Total") vtExist.add(h);
   }
-  // Only LCP PRs get a column in Vendor Tracking (LDP PRs stay only in the Invoice Worksheet).
+  // Mirror every PR that has any data into Vendor Tracking — see classification above.
   // .reverse() = create right-to-left.
   const missing = invPRs.filter((p) => p.isLCP && !vtExist.has(p.name)).reverse();
 
