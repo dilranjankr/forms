@@ -55,9 +55,19 @@ Office.onReady((info) => {
 
     (document.getElementById("addRow") as HTMLElement).onclick = () => addItemRow();
     (document.getElementById("generate") as HTMLElement).onclick = generate;
-    (document.getElementById("getPR") as HTMLElement).onclick = getPR;
-    (document.getElementById("updatePR") as HTMLElement).onclick = updatePR;
     (document.getElementById("invoiceGen") as HTMLElement).onclick = invoiceGen;
+
+    // Auto-load PR lines when user picks "Payment Request" in Section Type.
+    // Hide the "Latest PR" hint for any other section type.
+    (document.getElementById("secType") as HTMLSelectElement).onchange = (ev) => {
+      const v = (ev.target as HTMLSelectElement).value;
+      if (v === "Payment Request") {
+        void getPR();
+      } else {
+        const hint = document.getElementById("latestPRHint") as HTMLElement;
+        if (hint) hint.style.display = "none";
+      }
+    };
 
     (document.getElementById("addPORow") as HTMLElement).onclick = () => addPORow();
     (document.getElementById("loadEst") as HTMLElement).onclick = loadEst;
@@ -232,42 +242,29 @@ function clearFormUI() {
   );
   (document.getElementById("secType") as HTMLSelectElement).value = "";
   (document.getElementById("itemsBody") as HTMLTableSectionElement).innerHTML = "";
+  const hint = document.getElementById("latestPRHint") as HTMLElement;
+  if (hint) hint.style.display = "none";
   for (let i = 0; i < 4; i++) addItemRow();
 }
 
 async function generate() {
   const form = readForm();
-  if (form.secType === "Payment Request") { setStatus("Payment Request ke liye 'Run Update pr' button use karein.", "err"); return; }
   if (!form.secType) { setStatus("Select a Section Type.", "err"); return; }
   if (!form.colName) { setStatus("Enter a Column Name.", "err"); return; }
   if (form.items.length === 0) { setStatus("Add at least one line item.", "err"); return; }
 
-  setStatus("Running Input Form…", "busy"); setBusy(true);
-  try {
-    let summary = "Done.";
-    await Excel.run(async (context) => { summary = await runInputForm(context, form); });
-    setStatus(summary, "ok");
-    clearFormUI();
-    poLoaded = false; // refresh PO contracts dropdown on next PO tab visit (new contract added)
-  } catch (e) {
-    console.error(e);
-    setStatus("ERROR: " + errMsg(e), "err");
-  } finally { setBusy(false); }
-}
-
-async function updatePR() {
-  const form = readForm();
-  const makePR = form.secType === "Payment Request" && form.colName !== "" && form.items.length > 0;
-  setStatus(makePR ? "Creating PR + updating Vendor Tracking…" : "Updating Vendor Tracking…", "busy");
+  const isPR = form.secType === "Payment Request";
+  setStatus(isPR ? "Saving PR + updating Vendor Tracking…" : "Saving to Workbook…", "busy");
   setBusy(true);
   try {
-    let prMsg = "";
+    let summary = "Done.";
     await Excel.run(async (context) => {
-      if (makePR) prMsg = await runInputForm(context, form); // create/fill the PR column in the Invoice Worksheet
-      await runUpdatePR(context); // mirror PR columns into Vendor Tracking
+      summary = await runInputForm(context, form); // creates/fills the column in the Invoice Worksheet
+      if (isPR) await runUpdatePR(context);        // mirrors PR columns into Vendor Tracking
     });
-    setStatus(makePR ? `${prMsg} Vendor Tracking linked.` : "Vendor Tracking updated — PR columns linked.", "ok");
-    if (makePR) clearFormUI();
+    setStatus(isPR ? `${summary} Vendor Tracking linked.` : summary, "ok");
+    clearFormUI();
+    poLoaded = false; // refresh PO contracts dropdown on next PO tab visit (new contract added)
   } catch (e) {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
@@ -290,7 +287,19 @@ async function getPR() {
   setStatus("Loading lines…", "busy"); setBusy(true);
   try {
     let loaded: { desc: string; amt: number | "" }[] = [];
-    await Excel.run(async (context) => { loaded = await runGetPR(context); });
+    let latestPR = "";
+    await Excel.run(async (context) => {
+      loaded = await runGetPR(context);
+      latestPR = await runGetLatestPRName(context);
+    });
+
+    // Show the "Latest Payment Request" hint above Column Name
+    const hint = document.getElementById("latestPRHint") as HTMLElement;
+    const nm = document.getElementById("latestPRName") as HTMLElement;
+    if (hint && nm) {
+      nm.textContent = latestPR || "(none yet)";
+      hint.style.display = "";
+    }
 
     (document.getElementById("secType") as HTMLSelectElement).value = "Payment Request";
     const body = document.getElementById("itemsBody") as HTMLTableSectionElement;
@@ -302,7 +311,7 @@ async function getPR() {
       (tr.querySelector(".amt") as HTMLInputElement).value = it.amt === "" ? "" : String(it.amt);
     }
     for (let i = 0; i < 3; i++) addItemRow();
-    setStatus(`Loaded ${loaded.length} item(s). Edit amounts, set Column Name, then Run Input Form.`, "ok");
+    setStatus(`Loaded ${loaded.length} item(s). Edit amounts, set Column Name, then Save to Workbook.`, "ok");
   } catch (e) {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
@@ -1225,6 +1234,35 @@ async function runGetPR(context: Excel.RequestContext): Promise<{ desc: string; 
     out.push({ desc: d, amt });
   }
   return out;
+}
+
+// ───────────────────────── Latest PR name (for the hint above Column Name) ─────────────────────────
+
+async function runGetLatestPRName(context: Excel.RequestContext): Promise<string> {
+  const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  wsInv.load("name");
+  await context.sync();
+  if (wsInv.isNullObject) return "";
+
+  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0] as (string | number)[];
+  let tbbCol = -1;
+  for (let c = 0; c < hdr3.length; c++) {
+    if (hdr3[c] && String(hdr3[c]).trim().toUpperCase() === "PR#TBB") { tbbCol = c; break; }
+  }
+  if (tbbCol < 1) return "";
+
+  // Scan columns to the LEFT of PR#TBB for PR#N pattern, return highest
+  let highest = 0;
+  let highestName = "";
+  for (let c = 0; c < tbbCol; c++) {
+    const v = String(hdr3[c] || "").trim();
+    const m = v.match(/^PR#(\d+)/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > highest) { highest = n; highestName = v; }
+    }
+  }
+  return highestName;
 }
 
 // ───────────────────────── Run Invoice Generate ─────────────────────────

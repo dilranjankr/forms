@@ -100,7 +100,7 @@
 
         <!-- ───────── INVOICE FORM ───────── -->
         <div id="tab-invoice" class="tabpane active">
-            <div class="banner">LDP / LCP / CO / PR — INPUT FORM</div>
+            <div class="banner">PROJECT UPDATE</div>
 
             <div class="sband">Section Setup</div>
             <div class="grp">
@@ -112,6 +112,9 @@
                     <option value="Change Order">Change Order</option>
                     <option value="Payment Request">Payment Request</option>
                 </select>
+            </div>
+            <div id="latestPRHint" style="display:none; background:#fff7c8; border:1px solid #f0d97a; border-radius:2px; padding:8px 10px; font-size:12px; color:#5a5320; margin-bottom:12px;">
+                Latest Payment Request:&nbsp;<b id="latestPRName" style="color:#1f5130;">—</b>
             </div>
             <div class="grp"><label>Column Name (Row 3)</label><input type="text" id="colName" placeholder="e.g. LDP / PR#1 / CO#1" /></div>
             <div class="grp"><label>Date</label><input type="date" id="date" /></div>
@@ -139,9 +142,7 @@
             <button id="addRow" class="btn-add">+ Add row</button>
 
             <div class="sband">Run</div>
-            <button id="getPR" class="btn btn-orange">Get PR (load lines)</button>
-            <button id="generate" class="btn">Run Input Form</button>
-            <button id="updatePR" class="btn btn-sec">Run Update pr (Vendor Tracking)</button>
+            <button id="generate" class="btn">Save to Workbook</button>
             <button id="invoiceGen" class="btn btn-teal">Run Invoice Generate</button>
 
             <div class="help">
@@ -149,7 +150,7 @@
                 1. Pick Section Type &amp; Column Name, set the Date.<br>
                 2. Add line items (no amount = bold sub-header).<br>
                 3. Vendor Tracking only for a new LDP/LCP contract.<br>
-                <b>Payment Request:</b> click <b>Get PR</b> first to load lines &amp; PR#TBB amounts, edit, then <b>Run Input Form</b>. Each PR makes a new column.
+                <b>Payment Request:</b> selecting it auto-loads PR#TBB lines. Edit amounts, set Column Name (e.g. PR#1), then <b>Save to Workbook</b> — Vendor Tracking is updated automatically.
             </div>
         </div>
 
@@ -200,8 +201,8 @@
 
             <div class="sband">Invoice — how to use</div>
             <div style="font-size:12.5px; line-height:1.65; color:#2a2a2a; padding:2px;">
-                <b>New LDP / LCP / Change Order:</b> pick Section Type, Column Name, Date, add line items → <b>Run Input Form</b>.<br>
-                <b>Payment Request:</b> click <b>Get PR</b> → edit amounts + set Column Name (e.g. PR#1) → <b>Run Update pr</b>.<br>
+                <b>New LDP / LCP / Change Order:</b> pick Section Type, Column Name, Date, add line items → <b>Save to Workbook</b>.<br>
+                <b>Payment Request:</b> pick "Payment Request" — lines auto-load from PR#TBB → edit amounts + set Column Name (e.g. PR#1) → <b>Save to Workbook</b> (Vendor Tracking is linked automatically).<br>
                 <b>Finish:</b> <b>Run Invoice Generate</b> — refreshes PR#TBB and makes the PR invoice tabs.
             </div>
 
