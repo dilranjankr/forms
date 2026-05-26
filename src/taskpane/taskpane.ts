@@ -377,6 +377,41 @@ async function loadEst() {
 async function updatePo() {
   const form = readPOForm();
   if (!form.source) { setStatus("Select a Source Contract (run Load Est first).", "err"); return; }
+
+  // Detect action — only ADD (no ticks) should be guarded for duplicate PO numbers.
+  // UPDATE/MOVE intentionally re-touch existing rows so they don't need this warning.
+  let hasYMarks = false;
+  for (const r of form.formData) {
+    if (r[0] && String(r[0]).trim().toUpperCase() === "Y") { hasYMarks = true; break; }
+  }
+  const isAdd = !hasYMarks;
+
+  if (isAdd) {
+    setStatus("Checking for duplicate PO numbers…", "busy"); setBusy(true);
+    let dupes: string[] = [];
+    try {
+      await Excel.run(async (context) => { dupes = await runFindDuplicatePOs(context, form.formData); });
+    } catch (e) {
+      console.error(e);
+      setStatus("ERROR: " + errMsg(e), "err");
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    hideStatus();
+
+    if (dupes.length > 0) {
+      const list = dupes.map((p) => `  • ${p}`).join("\n");
+      const proceed = window.confirm(
+        `Ye PO number(s) workbook me pehle se save h:\n\n${list}\n\nKya aap fir bhi add karna chahte hain?`
+      );
+      if (!proceed) {
+        setStatus("Add cancelled — duplicate PO number(s) detected.", "err");
+        return;
+      }
+    }
+  }
+
   setStatus("Saving POs…", "busy"); setBusy(true);
   try {
     let summary = "POs saved.";
@@ -1633,6 +1668,45 @@ async function runLoadEst(context: Excel.RequestContext): Promise<string[]> {
 }
 
 // ───────────────────────── Update PO (Add / Update / Move) ─────────────────────────
+
+// Returns the subset of PO numbers from `formData` that already exist anywhere
+// in column E of the Vendor Tracking sheet. Case-insensitive, whitespace-trimmed.
+// Empty rows (no vendor / no PO num) are ignored.
+async function runFindDuplicatePOs(
+  context: Excel.RequestContext,
+  formData: (string | number)[][]
+): Promise<string[]> {
+  const inputPONums: string[] = [];
+  for (const r of formData) {
+    const vendor = r[1] ? String(r[1]).trim() : "";
+    const poNum = r[2] ? String(r[2]).trim() : "";
+    if (vendor && poNum) inputPONums.push(poNum);
+  }
+  if (inputPONums.length === 0) return [];
+
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (wsVT.isNullObject) return [];
+
+  const used = wsVT.getUsedRange();
+  used.load("rowCount");
+  await context.sync();
+  const lastRow = used && used.rowCount ? used.rowCount : 200;
+
+  const colE = await readValues(context, wsVT.getRange(`E1:E${lastRow}`));
+  const existing = new Set<string>();
+  for (const row of colE) {
+    const v = row[0] ? String(row[0]).trim() : "";
+    if (v) existing.add(v.toUpperCase());
+  }
+
+  const dupes: string[] = [];
+  for (const pn of inputPONums) {
+    if (existing.has(pn.toUpperCase()) && dupes.indexOf(pn) === -1) dupes.push(pn);
+  }
+  return dupes;
+}
 
 async function runUpdatePo(context: Excel.RequestContext, form: { source: string; target: string; formData: (string | number)[][] }) {
   const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
