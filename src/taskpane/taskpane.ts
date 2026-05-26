@@ -1080,6 +1080,27 @@ async function runUpdatePR(context: Excel.RequestContext) {
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
     await context.sync();
+
+    // Mirror PR#TBB's bottom-row formulas (column totals + Project Indicator rows like
+    // Total Cost LCP / Cost Percentage / Total Left to Pay Vendors) into the new PR column.
+    // Excel's formulas-only paste-special adjusts relative column references automatically,
+    // so SUM/ratio formulas retarget to the new column.
+    const tbbColIdx = insertAt + 1; // PR#TBB shifted right by 1 after the insert above
+    let indicRow = -1;
+    const scanVT = await readValues(context, wsVT.getRange("A1:Z60"));
+    for (let r = 0; r < scanVT.length && indicRow === -1; r++) {
+      for (let cc = 0; cc < scanVT[r].length; cc++) {
+        const v = scanVT[r][cc] ? String(scanVT[r][cc]).trim().toLowerCase() : "";
+        if (v.indexOf("project indicators") !== -1) { indicRow = r + 1; break; }
+      }
+    }
+    if (indicRow === -1) indicRow = 23; // safe fallback
+    const lastRow = indicRow + 25;
+    wsVT.getRange(`${col}${indicRow}:${col}${lastRow}`).copyFrom(
+      wsVT.getRange(`${CL(tbbColIdx)}${indicRow}:${CL(tbbColIdx)}${lastRow}`),
+      Excel.RangeCopyType.formulas
+    );
+    await context.sync();
   }
 
   const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
