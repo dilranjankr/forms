@@ -40,6 +40,11 @@ function toggleCls(el: Element, cls: string, on: boolean) {
 // ───────────────────────── Form (task pane) ─────────────────────────
 
 let poLoaded = false;
+// Tracks whether the line-items table was auto-filled by getPR() (Payment
+// Request flow). If the user then switches Section Type to LDP / LCP /
+// Change Order, those auto-loaded rows must be cleared — otherwise stale
+// PR line items would be saved against the wrong section type.
+let prItemsAutoLoaded = false;
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
@@ -58,7 +63,8 @@ Office.onReady((info) => {
     (document.getElementById("invoiceGen") as HTMLElement).onclick = invoiceGen;
 
     // Auto-load PR lines when user picks "Payment Request" in Section Type.
-    // Hide the "Latest PR" hint for any other section type.
+    // When switching to anything else, hide the "Latest PR" hint AND clear the
+    // auto-loaded line items so they don't bleed into an LDP / LCP / CO save.
     (document.getElementById("secType") as HTMLSelectElement).onchange = (ev) => {
       const v = (ev.target as HTMLSelectElement).value;
       if (v === "Payment Request") {
@@ -66,6 +72,12 @@ Office.onReady((info) => {
       } else {
         const hint = document.getElementById("latestPRHint") as HTMLElement;
         if (hint) hint.style.display = "none";
+        if (prItemsAutoLoaded) {
+          const body = document.getElementById("itemsBody") as HTMLTableSectionElement;
+          body.innerHTML = "";
+          for (let i = 0; i < 4; i++) addItemRow();
+          prItemsAutoLoaded = false;
+        }
       }
     };
 
@@ -244,6 +256,7 @@ function clearFormUI() {
   (document.getElementById("itemsBody") as HTMLTableSectionElement).innerHTML = "";
   const hint = document.getElementById("latestPRHint") as HTMLElement;
   if (hint) hint.style.display = "none";
+  prItemsAutoLoaded = false;
   for (let i = 0; i < 4; i++) addItemRow();
 }
 
@@ -311,6 +324,7 @@ async function getPR() {
       (tr.querySelector(".amt") as HTMLInputElement).value = it.amt === "" ? "" : String(it.amt);
     }
     for (let i = 0; i < 3; i++) addItemRow();
+    prItemsAutoLoaded = true; // remember so we can clear if user switches type
     setStatus(`Loaded ${loaded.length} item(s). Edit amounts, set Column Name, then Save to Workbook.`, "ok");
   } catch (e) {
     console.error(e);
@@ -524,12 +538,22 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     }
     if (found !== -1) {
       targetIdx = found;
+      // Existing column re-used — still write the date if the user supplied one
+      // (the previous logic only wrote the date when a fresh column was inserted,
+      // so updating an existing contract's date silently did nothing).
+      if (dateVal !== "") {
+        wsInv.getRange(`${CL(found)}4`).values = [[dateVal]];
+        wsInv.getRange(`${CL(found)}4`).numberFormat = [["m/d/yyyy"]];
+        await context.sync();
+      }
     } else {
       let insIdx = tdIdx;
       const prev = hdr3[tdIdx - 1] ? String(hdr3[tdIdx - 1]).trim().toUpperCase() : "";
       if (prev.includes("TBB")) insIdx = tdIdx - 1;
       wsInv.getRange(`${CL(insIdx)}:${CL(insIdx)}`).insert(Excel.InsertShiftDirection.right);
-      wsInv.getRange(`${CL(insIdx)}2`).values = [["Change Order"]];
+      // Row 2 = section type. Previously hard-coded to "Change Order" which mis-labeled
+      // brand-new LDP / LCP contracts.
+      wsInv.getRange(`${CL(insIdx)}2`).values = [[secType]];
       wsInv.getRange(`${CL(insIdx)}3`).values = [[colName]];
       if (dateVal !== "") {
         wsInv.getRange(`${CL(insIdx)}4`).values = [[dateVal]];
