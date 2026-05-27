@@ -16,8 +16,11 @@
       #sideload-msg { padding: 28px; color: #6b7682; text-align: center; }
       main { padding: 0; }
 
+      /* Top brand bar — always visible, sits above the tab row */
+      .topbar { background: #1f5130; color: #fff; font-size: 15px; font-weight: 700; letter-spacing: .5px; padding: 13px 14px; }
+
       /* Tabs */
-      .tabs { display: -ms-flexbox; display: flex; background: #eef1ee; }
+      .tabs { display: -ms-flexbox; display: flex; background: #eef1ee; border-bottom: 1px solid #d8dcd5; }
       .tab { -ms-flex: 1 1 0px; flex: 1 1 0px; padding: 10px 8px; cursor: pointer; border: none; background: none; color: #5a6b60; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; }
       .tab.active { background: #fff; color: #1f5130; border-bottom-color: #1f8a4d; }
       .tab-help { -ms-flex: 0 0 38px; flex: 0 0 38px; padding: 10px 0; cursor: pointer; border: none; background: #d5e6cb; color: #1f5130; font-size: 17px; font-weight: 700; border-bottom: 2px solid transparent; }
@@ -113,6 +116,8 @@
 
     <main id="app-body" style="display: none;">
 
+        <div class="topbar">PROJECT UPDATE</div>
+
         <div class="tabs">
             <button class="tab active" data-tab="invoice">Invoice Form</button>
             <button class="tab" data-tab="po">PO Form</button>
@@ -121,8 +126,6 @@
 
         <!-- ───────── INVOICE FORM ───────── -->
         <div id="tab-invoice" class="tabpane active">
-            <div class="banner">PROJECT UPDATE</div>
-
             <div class="sband">Section Setup</div>
             <div class="grp">
                 <label>Section Type</label>
@@ -177,8 +180,6 @@
 
         <!-- ───────── PO FORM ───────── -->
         <div id="tab-po" class="tabpane">
-            <div class="banner po">PO MANAGEMENT — INPUT FORM</div>
-
             <div class="sband po">Setup</div>
             <div class="grp">
                 <label>Contract (Source)</label>
