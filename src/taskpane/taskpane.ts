@@ -62,6 +62,27 @@ Office.onReady((info) => {
     (document.getElementById("generate") as HTMLElement).onclick = generate;
     (document.getElementById("invoiceGen") as HTMLElement).onclick = invoiceGen;
 
+    // Help overlay — opens fullscreen Help & Reference panel
+    (document.getElementById("helpBtn") as HTMLElement).onclick = () => {
+      (document.getElementById("helpOverlay") as HTMLElement).style.display = "";
+    };
+    (document.getElementById("helpClose") as HTMLElement).onclick = () => {
+      (document.getElementById("helpOverlay") as HTMLElement).style.display = "none";
+    };
+    // Collapsible help sections
+    qsa(".hsec-head").forEach((h) => {
+      (h as HTMLElement).onclick = () => {
+        const tgt = (h as HTMLElement).getAttribute("data-target");
+        if (!tgt) return;
+        const body = document.getElementById(tgt) as HTMLElement | null;
+        const arrow = (h as HTMLElement).querySelector(".hsec-arrow") as HTMLElement | null;
+        if (!body) return;
+        const open = body.style.display !== "none";
+        body.style.display = open ? "none" : "";
+        if (arrow) arrow.textContent = open ? "▶" : "▼";
+      };
+    });
+
     // Auto-load PR lines when user picks "Payment Request" in Section Type.
     // When switching to anything else, hide the "Latest PR" hint AND clear the
     // auto-loaded line items so they don't bleed into an LDP / LCP / CO save.

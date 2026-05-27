@@ -20,6 +20,27 @@
       .tabs { display: -ms-flexbox; display: flex; background: #eef1ee; }
       .tab { -ms-flex: 1 1 0px; flex: 1 1 0px; padding: 10px 8px; cursor: pointer; border: none; background: none; color: #5a6b60; font-size: 13px; font-weight: 600; border-bottom: 2px solid transparent; }
       .tab.active { background: #fff; color: #1f5130; border-bottom-color: #1f8a4d; }
+      .tab-help { -ms-flex: 0 0 38px; flex: 0 0 38px; padding: 10px 0; cursor: pointer; border: none; background: #d5e6cb; color: #1f5130; font-size: 17px; font-weight: 700; border-bottom: 2px solid transparent; }
+      .tab-help:hover { background: #c1d6b6; }
+
+      /* Help overlay — sections */
+      .hsec { border-bottom: 1px solid #e5e7e3; }
+      .hsec-head { display: -ms-flexbox; display: flex; -ms-flex-align: center; align-items: center; padding: 13px 4px; cursor: pointer; font-size: 13.5px; font-weight: 700; color: #1f5130; }
+      .hsec-head:hover { background: #f5f7f3; }
+      .hsec-arrow { display: inline-block; width: 18px; color: #1f8a4d; font-size: 11px; }
+      .hsec-body { padding: 4px 4px 14px 22px; }
+      .hcard { background: #f7faf6; border: 1px solid #d6e2cf; border-radius: 3px; padding: 10px 12px; margin-bottom: 10px; }
+      .hcard-title { font-weight: 700; color: #1f5130; font-size: 12.5px; margin-bottom: 6px; }
+      .hcard p { margin: 4px 0; font-size: 12.5px; line-height: 1.5; color: #2a2a2a; }
+      .hsteps { margin: 4px 0 0 16px; padding: 0; font-size: 12.5px; line-height: 1.55; color: #2a2a2a; }
+      .hsteps li { margin-bottom: 3px; }
+      .hbul { margin: 4px 0 0 16px; padding: 0; font-size: 12.5px; line-height: 1.55; color: #2a2a2a; }
+      .hbul li { margin-bottom: 4px; }
+      .htbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+      .htbl td { padding: 6px 8px; border-bottom: 1px solid #e5e7e3; vertical-align: top; color: #2a2a2a; line-height: 1.45; }
+      .htbl td:first-child { width: 38%; color: #1f5130; }
+      .hcode { background: #1f2a1a; color: #d8e8d2; font-family: Consolas, "Courier New", monospace; padding: 8px 10px; border-radius: 3px; font-size: 11.5px; word-break: break-all; margin-top: 6px; }
+      .hwarn { background: #fff9e6; border-left: 4px solid #d6a300; padding: 10px 12px; border-radius: 2px; }
 
       .tabpane { display: none; padding: 0 14px 24px; }
       .tabpane.active { display: block; }
@@ -95,7 +116,7 @@
         <div class="tabs">
             <button class="tab active" data-tab="invoice">Invoice Form</button>
             <button class="tab" data-tab="po">PO Form</button>
-            <button class="tab" data-tab="help">Help</button>
+            <button id="helpBtn" class="tab-help" title="Help &amp; Reference" aria-label="Help">?</button>
         </div>
 
         <!-- ───────── INVOICE FORM ───────── -->
@@ -195,36 +216,180 @@
             </div>
         </div>
 
-        <!-- ───────── HELP ───────── -->
-        <div id="tab-help" class="tabpane">
-            <div class="banner">HELP &amp; RULES</div>
-
-            <div class="sband">Invoice — how to use</div>
-            <div style="font-size:12.5px; line-height:1.65; color:#2a2a2a; padding:2px;">
-                <b>New LDP / LCP / Change Order:</b> pick Section Type, Column Name, Date, add line items → <b>Save to Workbook</b>.<br>
-                <b>Payment Request:</b> pick "Payment Request" — lines auto-load from PR#TBB → edit amounts + set Column Name (e.g. PR#1) → <b>Save to Workbook</b> (Vendor Tracking is linked automatically).<br>
-                <b>Finish:</b> <b>Run Invoice Generate</b> — refreshes PR#TBB and makes the PR invoice tabs.
-            </div>
-
-            <div class="sband">Purchase Orders — how to use</div>
-            <div style="font-size:12.5px; line-height:1.65; color:#2a2a2a; padding:2px;">
-                <b>Add POs:</b> choose Source contract, fill PO rows → <b>Run Update Po</b>.<br>
-                <b>Move POs:</b> <b>Run Load Po to Move</b> → tick rows → choose Target → <b>Run Move Po</b>.<br>
-                <b>Adjustment:</b> select Source/PO, enter Contract Adjust + Description → <b>Run Contract Adjust</b>.
-            </div>
-
-            <div class="sband">⚠ Do NOT change in the workbook</div>
-            <div class="help">
-                • <b>Sheet names</b> (Invoice Worksheet, Vendor Tracking, PR#TBB, PO Input Form, Payments) — don't rename.<br>
-                • The bold <b>LDP</b> / <b>LCP</b> marker rows in column A — LDP vs LCP is decided by these (not by the contract name).<br>
-                • Header text: <b>Total To date, Paid to Date, Payment Request, LDP Total, Total, PR#TBB, Grand - TOTALS, SUB - TOTALS - LDP/LCP</b> — keep the exact spelling.<br>
-                • Don't delete the <b>PR#TBB</b> / <b>CO#TBB</b> columns — new columns are inserted before them.<br>
-                • Every Payment Request makes a NEW column. PR#1, PR#2… tabs are frozen snapshots; only PR#TBB stays live.
-            </div>
-        </div>
-
         <div id="status" class="status"></div>
     </main>
+
+    <!-- ───────── HELP OVERLAY ───────── -->
+    <div id="helpOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:#fff; z-index:900; overflow-y:auto;">
+      <div style="background:#1f5130; color:#fff; padding:13px 14px; display:-ms-flexbox; display:flex; -ms-flex-align:center; align-items:center; -ms-flex-pack:justify; justify-content:space-between; position:sticky; top:0; z-index:1;">
+        <span style="font-size:14.5px; font-weight:700; letter-spacing:.3px;">HELP &amp; REFERENCE</span>
+        <button id="helpClose" style="background:transparent; border:1px solid rgba(255,255,255,0.4); color:#fff; width:28px; height:28px; border-radius:50%; font-size:16px; font-weight:700; cursor:pointer; line-height:1; padding:0;">×</button>
+      </div>
+
+      <div style="padding:0 14px 24px;">
+
+        <!-- Quick start -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-quick">
+            <span class="hsec-arrow">▼</span>
+            <span>1. Quick Start</span>
+          </div>
+          <div id="hs-quick" class="hsec-body" style="display:block;">
+            <div class="hcard">
+              <div class="hcard-title">New LDP / LCP / Change Order</div>
+              <ol class="hsteps">
+                <li>Pick the Section Type.</li>
+                <li>Enter a Column Name (e.g. <i>Kiser LCP Phase 1</i>, <i>CO#2</i>).</li>
+                <li>Pick a Date.</li>
+                <li>Fill Vendor Tracking (only for a brand-new contract).</li>
+                <li>Add line items (no amount = bold sub-header).</li>
+                <li>Click <b>Save to Workbook</b>.</li>
+              </ol>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Payment Request</div>
+              <ol class="hsteps">
+                <li>Select <b>Payment Request</b> — the form auto-loads PR#TBB lines.</li>
+                <li>Edit the amounts that should appear on this PR.</li>
+                <li>Set the Column Name (e.g. <i>PR#3</i> — the latest PR name is shown above the field).</li>
+                <li>Click <b>Save to Workbook</b>.</li>
+                <li>Vendor Tracking is updated automatically.</li>
+              </ol>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Generate Invoice</div>
+              <p>When you're ready to issue invoices, click <b>Run Invoice Generate</b>. It refreshes PR#TBB and creates the frozen PR#1, PR#2… invoice tabs.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Common tasks -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-tasks">
+            <span class="hsec-arrow">▶</span>
+            <span>2. Common Tasks</span>
+          </div>
+          <div id="hs-tasks" class="hsec-body" style="display:none;">
+            <table class="htbl">
+              <tr><td>Add a new LDP contract</td><td>Invoice Form → Section Type <b>LDP</b></td></tr>
+              <tr><td>Add a new LCP contract</td><td>Invoice Form → Section Type <b>LCP</b></td></tr>
+              <tr><td>Add a Change Order</td><td>Invoice Form → Section Type <b>Change Order</b></td></tr>
+              <tr><td>Raise a Payment Request</td><td>Invoice Form → Section Type <b>Payment Request</b></td></tr>
+              <tr><td>Generate final PR invoice tabs</td><td>Invoice Form → <b>Run Invoice Generate</b></td></tr>
+              <tr><td>Add a new PO to a contract</td><td>PO Form → pick Source → fill rows → <b>Run Update Po</b></td></tr>
+              <tr><td>Update existing POs</td><td>PO Form → pick Source → tick ✓ rows → edit → <b>Run Update Po</b></td></tr>
+              <tr><td>Move POs to another contract</td><td>PO Form → <b>Run Load Po to Move</b> → tick rows → pick Target → <b>Run Move Po</b></td></tr>
+              <tr><td>Apply a contract adjustment</td><td>PO Form → pick Source → enter Adjust + Description → <b>Run Contract Adjust</b></td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Glossary -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-gloss">
+            <span class="hsec-arrow">▶</span>
+            <span>3. Glossary</span>
+          </div>
+          <div id="hs-gloss" class="hsec-body" style="display:none;">
+            <table class="htbl">
+              <tr><td><b>LDP</b></td><td>Landscape Design and Permitting — the design phase of a project.</td></tr>
+              <tr><td><b>LCP</b></td><td>Landscape Construction Phase — the build phase.</td></tr>
+              <tr><td><b>CO</b></td><td>Change Order — additional scope added after the original contract.</td></tr>
+              <tr><td><b>PR</b></td><td>Payment Request — an invoice issued to the client.</td></tr>
+              <tr><td><b>PR#TBB</b></td><td>Payment Request — To Be Billed. A live, rolling column that holds every line waiting to be invoiced.</td></tr>
+              <tr><td><b>PO</b></td><td>Purchase Order — issued to a vendor / sub-contractor.</td></tr>
+              <tr><td><b>EST</b></td><td>Estimate number from a vendor.</td></tr>
+              <tr><td><b>VT</b></td><td>Vendor Tracking sheet — per-contract vendor + PO breakdown.</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- Field guide -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-fields">
+            <span class="hsec-arrow">▶</span>
+            <span>4. Field Guide</span>
+          </div>
+          <div id="hs-fields" class="hsec-body" style="display:none;">
+            <div class="hcard">
+              <div class="hcard-title">Invoice Form</div>
+              <table class="htbl">
+                <tr><td><b>Section Type</b></td><td>LDP, LCP, Change Order, or Payment Request.</td></tr>
+                <tr><td><b>Column Name</b></td><td>The header that appears at the top of the new column on the Invoice Worksheet.</td></tr>
+                <tr><td><b>Date</b></td><td>Goes into row 4 of the new column.</td></tr>
+                <tr><td><b>Section Header</b></td><td>Optional bold title shown above this section's line items.</td></tr>
+                <tr><td><b>Vendor Tracking</b></td><td>Contract Total / Cost / Hours / EST # — only filled for the very first run of a new contract.</td></tr>
+                <tr><td><b>Line Items</b></td><td>Description + Amount. A row with description but no amount becomes a bold sub-header.</td></tr>
+              </table>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">PO Form</div>
+              <table class="htbl">
+                <tr><td><b>Source contract</b></td><td>The contract you are adding / updating / moving POs from.</td></tr>
+                <tr><td><b>Target contract</b></td><td>Only used when moving POs.</td></tr>
+                <tr><td><b>Contract Adjust + Description</b></td><td>Use only with <b>Run Contract Adjust</b>. The amount is always saved as negative.</td></tr>
+                <tr><td><b>Tick (✓)</b></td><td>Marks a row for update or move. Unticked rows are treated as new POs.</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workbook rules -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-rules">
+            <span class="hsec-arrow">▶</span>
+            <span>5. Workbook Rules — Do NOT change</span>
+          </div>
+          <div id="hs-rules" class="hsec-body" style="display:none;">
+            <div class="hwarn">
+              <ul class="hbul">
+                <li>Do not rename the sheets — <b>Invoice Worksheet, Vendor Tracking, PR#TBB, PO Input Form, Payments</b>.</li>
+                <li>Do not delete the bold <b>LDP</b> / <b>LCP</b> marker rows in column A — LDP vs LCP is decided by these rows, not by the contract name.</li>
+                <li>Keep the exact spelling of these header strings: <b>Total To date, Paid to Date, Payment Request, LDP Total, Total, PR#TBB, Grand - TOTALS, SUB - TOTALS - LDP/LCP</b>.</li>
+                <li>Do not delete the <b>PR#TBB</b> or <b>CO#TBB</b> columns — new columns are always inserted just before them.</li>
+                <li>Every Payment Request creates a new column. The PR#1, PR#2 tabs are frozen snapshots; only PR#TBB stays live.</li>
+                <li>Do not edit row 5/6 of the new PR columns in Vendor Tracking by hand — they are live formulas linking to the Invoice Worksheet.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Troubleshooting -->
+        <div class="hsec">
+          <div class="hsec-head" data-target="hs-trbl">
+            <span class="hsec-arrow">▶</span>
+            <span>6. Troubleshooting</span>
+          </div>
+          <div id="hs-trbl" class="hsec-body" style="display:none;">
+            <div class="hcard">
+              <div class="hcard-title">Panel stuck on "Loading…"</div>
+              <ul class="hbul">
+                <li>Press <b>Ctrl + Shift + R</b> to hard-refresh the browser.</li>
+                <li>Close the Excel tab completely and reopen the workbook.</li>
+              </ul>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Icons look black or text isn't styled</div>
+              <p>The Office cache is stale. Press <b>Windows + R</b>, paste this path, delete everything inside, then reopen Excel:</p>
+              <div class="hcode">%LOCALAPPDATA%\Microsoft\Office\16.0\Wef</div>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Date is not saving in the Invoice Worksheet</div>
+              <p>Make sure the Date field is filled <i>before</i> you click Save to Workbook. The date goes into row 4 of the new column.</p>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Add-in name still shows the old label</div>
+              <p>Office caches the manifest. Sign out and sign in again from File → Account, or wait up to 24 hours for the auto-refresh.</p>
+            </div>
+            <div class="hcard">
+              <div class="hcard-title">Still stuck?</div>
+              <p>Send a screenshot of the panel (with the status message) to your IT contact or the add-in maintainer.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
 
     <!-- Duplicate-PO confirmation modal (in-page; window.confirm doesn't work in Office Add-ins) -->
     <div id="dupeModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000;">
