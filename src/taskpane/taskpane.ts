@@ -403,13 +403,15 @@ async function updatePo() {
   const form = readPOForm();
   if (!form.source) { setStatus("Select a Source Contract (run Load Est first).", "err"); return; }
 
-  // Detect action — only ADD (no ticks) should be guarded for duplicate PO numbers.
-  // UPDATE/MOVE intentionally re-touch existing rows so they don't need this warning.
+  // Detect action — only a pure ADD should be guarded for duplicate PO numbers.
+  // UPDATE/MOVE intentionally re-touch existing rows (and "Load Po to Move" pre-fills the
+  // form with existing PO numbers, so duplicate-checking that flow would always fire).
   let hasYMarks = false;
   for (const r of form.formData) {
     if (r[0] && String(r[0]).trim().toUpperCase() === "Y") { hasYMarks = true; break; }
   }
-  const isAdd = !hasYMarks;
+  const isMoveIntent = form.target !== "" && form.target !== form.source;
+  const isAdd = !hasYMarks && !isMoveIntent;
 
   if (isAdd) {
     setStatus("Checking for duplicate PO numbers…", "busy"); setBusy(true);
