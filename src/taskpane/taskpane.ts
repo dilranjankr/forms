@@ -49,7 +49,9 @@ let prItemsAutoLoaded = false;
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
     (document.getElementById("sideload-msg") as HTMLElement).style.display = "none";
-    (document.getElementById("app-body") as HTMLElement).style.display = "block";
+    // 'flex' (not 'block') so the column layout in CSS engages — pins the top bar
+    // and tabs above a scrollable form area.
+    (document.getElementById("app-body") as HTMLElement).style.display = "flex";
 
     for (let i = 0; i < 4; i++) addItemRow();
     for (let i = 0; i < 4; i++) addPORow();
