@@ -762,24 +762,34 @@ async function addVendorTrackingRow(
       sectionStart = lcpMarkerRow !== -1 ? lcpMarkerRow + 1 : 7;
       sectionEnd = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
     }
-    let firstEmpty = -1;
+
+    // Scan for the LAST non-empty row in this section (not the first empty one).
+    // Previously the code looked for the first gap and inserted there, which dropped
+    // new contracts into the middle of the section when separators existed between
+    // earlier entries. New contracts should always land at the BOTTOM of the section.
+    let lastUsed = -1;
     for (let row = sectionStart; row < sectionEnd; row++) {
-      if (rowEmpty(row)) { firstEmpty = row; break; }
+      if (!rowEmpty(row)) lastUsed = row;
     }
-    if (firstEmpty === -1) {
-      // Section full → insert a new row at the boundary
-      vtRow = sectionEnd;
-      ws.getRange(`${vtRow}:${vtRow}`).insert(Excel.InsertShiftDirection.down);
-      await context.sync();
-    } else if (firstEmpty === sectionStart) {
-      // First contract in this section → right after the marker
-      vtRow = firstEmpty;
+
+    if (lastUsed === -1) {
+      // Section is empty → first contract goes right after the section marker
+      vtRow = sectionStart;
     } else {
-      // Existing content above → keep `firstEmpty` as a blank separator, place the contract below it
-      vtRow = firstEmpty + 1;
-      if (vtRow >= sectionEnd || !rowEmpty(vtRow)) {
-        ws.getRange(`${vtRow}:${vtRow}`).insert(Excel.InsertShiftDirection.down);
+      // Always place the new contract just before sectionEnd (the LCP marker / LCP
+      // Analysis / Client total row). Keep a blank separator above it.
+      const separatorNeeded = !rowEmpty(lastUsed + 1);
+      if (separatorNeeded) {
+        // No existing gap → insert 2 rows; first becomes the separator, second the contract
+        ws.getRange(`${sectionEnd}:${sectionEnd + 1}`).insert(Excel.InsertShiftDirection.down);
         await context.sync();
+        vtRow = sectionEnd + 1;
+      } else {
+        // There's already an empty row right after lastUsed acting as a separator;
+        // we just need one new row right before sectionEnd for the contract itself.
+        ws.getRange(`${sectionEnd}:${sectionEnd}`).insert(Excel.InsertShiftDirection.down);
+        await context.sync();
+        vtRow = sectionEnd;
       }
     }
   } else {
