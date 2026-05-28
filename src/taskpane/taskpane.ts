@@ -907,28 +907,88 @@ async function addVendorTrackingRow(
   }
 }
 
-async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Worksheet) {
-  const vtA = await readValues(context, ws.getRange("A5:A30"));
-  let clientRow = -1, firstDataRow = -1, lastDataRow = -1;
+// ───── Vendor Tracking client-total helpers ─────
+// The workbook can host three independent analysis blocks, each with its own
+// "Client total Contract/Cost" row:
+//   • LCP Analysis  → totals span only the LCP rows
+//   • LDP Analysis  → totals span only the LDP rows
+//   • Consolidated  → totals = LCP analysis row + LDP analysis row
+
+// Scan vtA (rows 5..N) for markers and the three analysis headers, returning the
+// row numbers and the immediately-following Client total row for each section.
+interface VtSections {
+  ldpMarker: number; lcpMarker: number;
+  lcpAnalysisRow: number; ldpAnalysisRow: number; consAnalysisRow: number;
+  lcpClientRow: number; ldpClientRow: number; consClientRow: number;
+}
+
+function scanVtSections(vtA: (string | number | boolean)[][]): VtSections {
+  const s: VtSections = {
+    ldpMarker: -1, lcpMarker: -1,
+    lcpAnalysisRow: -1, ldpAnalysisRow: -1, consAnalysisRow: -1,
+    lcpClientRow: -1, ldpClientRow: -1, consClientRow: -1,
+  };
   for (let r = 0; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
-    if (a.includes("Client total") || a.includes("Client Total")) clientRow = r + 5;
-    if (a !== "" && a !== "Contract" && !a.includes("Client total") && !a.includes("Client Total")
-      && !a.includes("Project Management") && !a.includes("Sub-Contractor")
-      && !a.includes("Percentage") && !a.includes("Gross Margin")) {
-      if (firstDataRow === -1) firstDataRow = r + 5;
-      lastDataRow = r + 5;
+    const rowNum = r + 5;
+    if (a === "LDP" && s.ldpMarker === -1) s.ldpMarker = rowNum;
+    if (a === "LCP" && s.lcpMarker === -1) s.lcpMarker = rowNum;
+    if (a.indexOf("LCP Analysis") !== -1 && s.lcpAnalysisRow === -1) s.lcpAnalysisRow = rowNum;
+    if (a.indexOf("LDP Analysis") !== -1 && s.ldpAnalysisRow === -1) s.ldpAnalysisRow = rowNum;
+    if (a.indexOf("Consolidated") !== -1 && s.consAnalysisRow === -1) s.consAnalysisRow = rowNum;
+  }
+  const findClientAfter = (anchor: number): number => {
+    if (anchor === -1) return -1;
+    for (let r = anchor - 5 + 1; r < vtA.length; r++) {
+      const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+      if (a.indexOf("Client total") !== -1 || a.indexOf("Client Total") !== -1) return r + 5;
+      // Stop scanning if we hit the next analysis header (no client total in this block)
+      if (a.indexOf("Analysis") !== -1 && r + 5 !== anchor) return -1;
     }
+    return -1;
+  };
+  s.lcpClientRow = findClientAfter(s.lcpAnalysisRow);
+  s.ldpClientRow = findClientAfter(s.ldpAnalysisRow);
+  s.consClientRow = findClientAfter(s.consAnalysisRow);
+  return s;
+}
+
+// Write the per-section formulas onto each Client total row.
+function writeClientTotalFormulas(ws: Excel.Worksheet, s: VtSections): void {
+  const setRow = (clientRow: number, build: (col: string) => string) => {
+    if (clientRow === -1) return;
+    const fB = build("B"), fC = build("C"), fD = build("D");
+    if (fB) { ws.getRange(`B${clientRow}`).formulas = [[fB]]; ws.getRange(`B${clientRow}`).numberFormat = [[FMT_ACCT]]; }
+    if (fC) { ws.getRange(`C${clientRow}`).formulas = [[fC]]; ws.getRange(`C${clientRow}`).numberFormat = [[FMT_ACCT]]; }
+    if (fD) { ws.getRange(`D${clientRow}`).formulas = [[fD]]; ws.getRange(`D${clientRow}`).numberFormat = [["0.00"]]; }
+  };
+
+  // LCP Analysis: sum rows just after the LCP marker, just before the LCP Analysis header
+  if (s.lcpMarker !== -1 && s.lcpAnalysisRow !== -1 && s.lcpAnalysisRow > s.lcpMarker + 1) {
+    const start = s.lcpMarker + 1, end = s.lcpAnalysisRow - 1;
+    setRow(s.lcpClientRow, (col) => `=SUM(${col}${start}:${col}${end})`);
   }
-  if (clientRow !== -1 && firstDataRow !== -1 && lastDataRow !== -1) {
-    ws.getRange(`B${clientRow}`).formulas = [[`=SUM(B${firstDataRow}:B${lastDataRow})`]];
-    ws.getRange(`B${clientRow}`).numberFormat = [[FMT_ACCT]];
-    ws.getRange(`C${clientRow}`).formulas = [[`=SUM(C${firstDataRow}:C${lastDataRow})`]];
-    ws.getRange(`C${clientRow}`).numberFormat = [[FMT_ACCT]];
-    ws.getRange(`D${clientRow}`).formulas = [[`=SUM(D${firstDataRow}:D${lastDataRow})`]];
-    ws.getRange(`D${clientRow}`).numberFormat = [["0.00"]];
-    await context.sync();
+  // LDP Analysis: sum rows just after the LDP marker, just before the LCP marker
+  if (s.ldpMarker !== -1 && s.lcpMarker !== -1 && s.lcpMarker > s.ldpMarker + 1) {
+    const start = s.ldpMarker + 1, end = s.lcpMarker - 1;
+    setRow(s.ldpAnalysisRow !== -1 ? s.ldpClientRow : -1, (col) => `=SUM(${col}${start}:${col}${end})`);
   }
+  // Consolidated: =LCPClientRow + LDPClientRow (auto-updates if either total changes)
+  if (s.consClientRow !== -1) {
+    setRow(s.consClientRow, (col) => {
+      const refs: string[] = [];
+      if (s.lcpClientRow !== -1) refs.push(`${col}${s.lcpClientRow}`);
+      if (s.ldpClientRow !== -1) refs.push(`${col}${s.ldpClientRow}`);
+      return refs.length === 0 ? "" : "=" + refs.join("+");
+    });
+  }
+}
+
+async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Worksheet) {
+  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const s = scanVtSections(vtA);
+  writeClientTotalFormulas(ws, s);
+  await context.sync();
 }
 
 async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
@@ -2002,23 +2062,10 @@ async function poDoMove(context: Excel.RequestContext, wsVT: Excel.Worksheet, so
 }
 
 async function updateClientTotal(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
-  const vtA = await readValues(context, wsVT.getRange("A5:A60"));
-  let clientRow = -1, firstData = -1, lastData = -1;
-  for (let r = 0; r < vtA.length; r++) {
-    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
-    if (a.includes("Client total") || a.includes("Client Total")) { clientRow = r + 5; break; }
-    if (a !== "" && a !== "Contract" && !a.includes("Without Estimate") && !a.includes("Project Management")
-      && !a.includes("Sub-Contractor") && !a.includes("Percentage") && !a.includes("Gross Margin")) {
-      if (firstData === -1) firstData = r + 5;
-      lastData = r + 5;
-    }
-  }
-  if (clientRow !== -1 && firstData !== -1) {
-    wsVT.getRange(`B${clientRow}`).formulas = [[`=SUMPRODUCT((B${firstData}:B${lastData}<>"")*1,B${firstData}:B${lastData})`]];
-    wsVT.getRange(`C${clientRow}`).formulas = [[`=SUMPRODUCT((C${firstData}:C${lastData}<>"")*1,C${firstData}:C${lastData})`]];
-    wsVT.getRange(`D${clientRow}`).formulas = [[`=SUMPRODUCT((D${firstData}:D${lastData}<>"")*1,D${firstData}:D${lastData})`]];
-    await context.sync();
-  }
+  const vtA = await readValues(context, wsVT.getRange("A5:A80"));
+  const s = scanVtSections(vtA);
+  writeClientTotalFormulas(wsVT, s);
+  await context.sync();
 }
 
 async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksheet, contract: string): Promise<number> {
