@@ -787,15 +787,20 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
         );
         await context.sync();
       }
+      // Set Aptos 9pt on the WHOLE A:D range BEFORE merging so the right-most
+      // cell's font doesn't win after merge.
+      wsPR.getRange(`A${targetRow}:D${targetRow}`).format.font.name = "Aptos";
+      wsPR.getRange(`A${targetRow}:D${targetRow}`).format.font.size = 9;
       wsPR.getRange(`A${targetRow}:D${targetRow}`).merge(false);
       subTotalRow++;
     }
     wsPR.getRange(`A${targetRow}`).values = [[desc]];
+    // Re-assert Aptos 9pt + normal weight on the merged anchor.
+    wsPR.getRange(`A${targetRow}`).format.font.name = "Aptos";
+    wsPR.getRange(`A${targetRow}`).format.font.size = 9;
     // Column A descriptions always render in normal weight (not bold), even for
     // sub-header items.
     wsPR.getRange(`A${targetRow}`).format.font.bold = false;
-    wsPR.getRange(`A${targetRow}`).format.font.name = "Aptos";
-    wsPR.getRange(`A${targetRow}`).format.font.size = 9;
     await context.sync();
   }
 }
@@ -1665,14 +1670,19 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       continue;
     }
 
+    // Set Aptos 9pt on the WHOLE A:D range BEFORE merging — Excel's merge logic
+    // otherwise tends to inherit the right-most cell's font (Calibri default).
+    wsTBB.getRange(`A${t}:D${t}`).format.font.name = "Aptos";
+    wsTBB.getRange(`A${t}:D${t}`).format.font.size = 9;
     wsTBB.getRange(`A${t}:D${t}`).merge(false);
     wsTBB.getRange(`A${t}`).values = [[dataRows[i].desc]];
     wsTBB.getRange(`A${t}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    // Re-assert font on the merged anchor in case merge clobbered it.
+    wsTBB.getRange(`A${t}`).format.font.name = "Aptos";
+    wsTBB.getRange(`A${t}`).format.font.size = 9;
     // Mirror the description's bold state from the Invoice Worksheet — if the
     // source row was bold (sub-header) keep it bold here, otherwise normal.
     wsTBB.getRange(`A${t}`).format.font.bold = dataRows[i].isBold;
-    wsTBB.getRange(`A${t}`).format.font.name = "Aptos";
-    wsTBB.getRange(`A${t}`).format.font.size = 9;
 
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
