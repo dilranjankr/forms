@@ -546,6 +546,14 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
       if (prev.includes("TBB")) insIdx = paidS - 1;
     }
     wsInv.getRange(`${CL(insIdx)}:${CL(insIdx)}`).insert(Excel.InsertShiftDirection.right);
+    await context.sync();
+    // After insert, PR#TBB shifts right by one column. Copy its column formatting
+    // (borders, fills, number formats) onto the new PR column so it matches.
+    const tbbColIdx = insIdx + 1;
+    wsInv.getRange(`${CL(insIdx)}1:${CL(insIdx)}200`).copyFrom(
+      wsInv.getRange(`${CL(tbbColIdx)}1:${CL(tbbColIdx)}200`),
+      Excel.RangeCopyType.formats
+    );
     wsInv.getRange(`${CL(insIdx)}2`).values = [["Payment Request"]];
     wsInv.getRange(`${CL(insIdx)}3`).values = [[colName]];
     if (dateVal !== "") {
@@ -572,8 +580,20 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     } else {
       let insIdx = tdIdx;
       const prev = hdr3[tdIdx - 1] ? String(hdr3[tdIdx - 1]).trim().toUpperCase() : "";
-      if (prev.includes("TBB")) insIdx = tdIdx - 1;
+      const hadTBBNeighbour = prev.includes("TBB");
+      if (hadTBBNeighbour) insIdx = tdIdx - 1;
       wsInv.getRange(`${CL(insIdx)}:${CL(insIdx)}`).insert(Excel.InsertShiftDirection.right);
+      await context.sync();
+      // After insert, CO#TBB (the previous neighbour at hdr3[tdIdx-1]) has shifted
+      // right by one. Copy its column formatting onto the new column so the new
+      // Change Order / LDP / LCP column matches the established style.
+      if (hadTBBNeighbour) {
+        const tbbColIdx = insIdx + 1;
+        wsInv.getRange(`${CL(insIdx)}1:${CL(insIdx)}200`).copyFrom(
+          wsInv.getRange(`${CL(tbbColIdx)}1:${CL(tbbColIdx)}200`),
+          Excel.RangeCopyType.formats
+        );
+      }
       // Row 2 = section type. Previously hard-coded to "Change Order" which mis-labeled
       // brand-new LDP / LCP contracts.
       wsInv.getRange(`${CL(insIdx)}2`).values = [[secType]];
@@ -756,11 +776,24 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
     if (targetRow === -1) {
       targetRow = subTotalRow;
       wsPR.getRange(`${targetRow}:${targetRow}`).insert(Excel.InsertShiftDirection.down);
+      await context.sync();
+      // Inherit the template row's formatting (borders, fills, merge) so the
+      // newly inserted row looks identical to the existing description rows.
+      const templateRow = targetRow - 1;
+      if (templateRow >= descStart) {
+        wsPR.getRange(`A${targetRow}:M${targetRow}`).copyFrom(
+          wsPR.getRange(`A${templateRow}:M${templateRow}`),
+          Excel.RangeCopyType.formats
+        );
+        await context.sync();
+      }
       wsPR.getRange(`A${targetRow}:D${targetRow}`).merge(false);
       subTotalRow++;
     }
     wsPR.getRange(`A${targetRow}`).values = [[desc]];
-    wsPR.getRange(`A${targetRow}`).format.font.bold = item.isHdr;
+    // Column A descriptions always render in normal weight (not bold), even for
+    // sub-header items.
+    wsPR.getRange(`A${targetRow}`).format.font.bold = false;
     await context.sync();
   }
 }
@@ -1532,8 +1565,24 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   }
 
   if (needed > tplRows && tbbSubRow !== -1) {
-    wsTBB.getRange(`${tbbSubRow}:${tbbSubRow + needed - tplRows - 1}`).insert(Excel.InsertShiftDirection.down);
+    const insStart = tbbSubRow;
+    const insEnd = tbbSubRow + needed - tplRows - 1;
+    wsTBB.getRange(`${insStart}:${insEnd}`).insert(Excel.InsertShiftDirection.down);
     await context.sync();
+    // The freshly inserted rows have no borders / fills of their own. Copy the
+    // formatting (borders, alignment, fills) from a known-good template row
+    // (the last existing data row, just above the original SUB-TOTALS row) so
+    // the new rows look identical to the surrounding template rows.
+    const templateRow = insStart - 1;
+    if (templateRow >= tbbStart) {
+      for (let r = insStart; r <= insEnd; r++) {
+        wsTBB.getRange(`A${r}:M${r}`).copyFrom(
+          wsTBB.getRange(`A${templateRow}:M${templateRow}`),
+          Excel.RangeCopyType.formats
+        );
+      }
+      await context.sync();
+    }
   } else if (needed < tplRows && tbbSubRow !== -1) {
     wsTBB.getRange(`${tbbStart + needed}:${tbbStart + tplRows - 1}`).delete(Excel.DeleteShiftDirection.up);
     await context.sync();
@@ -1554,10 +1603,11 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     wsTBB.getRange(`A${t}:D${t}`).merge(false);
     wsTBB.getRange(`A${t}`).values = [[dataRows[i].desc]];
     wsTBB.getRange(`A${t}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
-    if (dataRows[i].isBold) wsTBB.getRange(`A${t}`).format.font.bold = true;
+    // Column A descriptions stay in normal weight (was previously bolded for sub-headers).
+    wsTBB.getRange(`A${t}`).format.font.bold = false;
 
-    const edges = [Excel.BorderIndex.edgeTop, Excel.BorderIndex.edgeBottom, Excel.BorderIndex.edgeLeft, Excel.BorderIndex.edgeRight];
-    for (const ed of edges) wsTBB.getRange(`A${t}:M${t}`).format.borders.getItem(ed).style = Excel.BorderLineStyle.none;
+    // (The previous explicit border-removal here wiped the borders inherited from
+    // the template row above — keep the template's borders intact.)
 
     wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
     wsTBB.getRange(`F${t}`).values = [[""]];
