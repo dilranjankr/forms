@@ -794,6 +794,8 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
     // Column A descriptions always render in normal weight (not bold), even for
     // sub-header items.
     wsPR.getRange(`A${targetRow}`).format.font.bold = false;
+    wsPR.getRange(`A${targetRow}`).format.font.name = "Aptos";
+    wsPR.getRange(`A${targetRow}`).format.font.size = 9;
     await context.sync();
   }
 }
@@ -1669,6 +1671,8 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // Mirror the description's bold state from the Invoice Worksheet — if the
     // source row was bold (sub-header) keep it bold here, otherwise normal.
     wsTBB.getRange(`A${t}`).format.font.bold = dataRows[i].isBold;
+    wsTBB.getRange(`A${t}`).format.font.name = "Aptos";
+    wsTBB.getRange(`A${t}`).format.font.size = 9;
 
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
