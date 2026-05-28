@@ -1045,11 +1045,13 @@ async function updateAllFormulas(
     ws.getRange(`${tdCol}${r}`).numberFormat = [[FMT_USD]];
 
     if (hCol && prS) {
-      ws.getRange(`${hCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(${prS}${r}:${prE}${r}<>""))=0,"",SUM(${prS}${r}:${prE}${r})-${prE}${r})`]];
+      // Paid to Date: SUM of all PR amounts minus PR#TBB (last PR col)
+      ws.getRange(`${hCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",SUM(${prS}${r}:${prE}${r})-${prE}${r})`]];
       ws.getRange(`${hCol}${r}`).numberFormat = [[FMT_ACCT]];
     }
     if (cCol && prS) {
-      ws.getRange(`${cCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(${prS}${r}:${prE}${r}<>""))=0,"",SUM(${prS}${r}:${prE}${r}))`]];
+      // Completed to Date: SUM of all PR amounts including PR#TBB
+      ws.getRange(`${cCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",SUM(${prS}${r}:${prE}${r}))`]];
       ws.getRange(`${cCol}${r}`).numberFormat = [[FMT_ACCT]];
     }
     if (pCol) {
@@ -1057,7 +1059,8 @@ async function updateAllFormulas(
       ws.getRange(`${pCol}${r}`).numberFormat = [["0%"]];
     }
     if (bCol) {
-      ws.getRange(`${bCol}${r}`).formulas = [[`=IF(OR(${tdCol}${r}="",${cCol}${r}=""),"",${tdCol}${r}-${cCol}${r})`]];
+      // Balance to Finish: TotalToDate - Completed (only guards against blank TD)
+      ws.getRange(`${bCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",(${tdCol}${r}-${cCol}${r}))`]];
       ws.getRange(`${bCol}${r}`).numberFormat = [[FMT_USD]];
     }
   }
@@ -1603,8 +1606,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     wsTBB.getRange(`A${t}:D${t}`).merge(false);
     wsTBB.getRange(`A${t}`).values = [[dataRows[i].desc]];
     wsTBB.getRange(`A${t}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
-    // Column A descriptions stay in normal weight (was previously bolded for sub-headers).
-    wsTBB.getRange(`A${t}`).format.font.bold = false;
+    // Mirror the description's bold state from the Invoice Worksheet — if the
+    // source row was bold (sub-header) keep it bold here, otherwise normal.
+    wsTBB.getRange(`A${t}`).format.font.bold = dataRows[i].isBold;
 
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
