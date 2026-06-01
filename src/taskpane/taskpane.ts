@@ -1769,9 +1769,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         wsTBB.getRange(`I${r}`).numberFormat = [[fmt]];
       }
       const finalTpRow = newTotalPaid + totalInsert;
-      const firstPayRow = insertAt + 1;
-      const lastPayRow = finalTpRow - 1;
-      wsTBB.getRange(`I${finalTpRow}`).formulas = [[`=I${stRow}+SUM(I${firstPayRow}:I${lastPayRow})`]];
+      // Total Paid To date = SUM down column I from SUB-TOTALS row through
+      // every payment row just above this Total Paid row.
+      wsTBB.getRange(`I${finalTpRow}`).formulas = [[`=SUM(I${stRow}:I${finalTpRow - 1})`]];
       wsTBB.getRange(`I${finalTpRow}`).numberFormat = [[fmt]];
       wsTBB.getRange(`G${finalTpRow}:M${finalTpRow}`).format.borders.getItem(Excel.BorderIndex.edgeTop).style = Excel.BorderLineStyle.continuous;
       await context.sync();
@@ -1780,9 +1780,12 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     const g = await readValues(context, wsTBB.getRange("G1:G80"));
     for (let r = 0; r < g.length; r++) {
       if (g[r][0] && String(g[r][0]).includes("Total Paid")) {
-        wsTBB.getRange(`I${r + 1}`).formulas = [[`=I${stRow}`]];
-        wsTBB.getRange(`I${r + 1}`).numberFormat = [[fmt]];
-        wsTBB.getRange(`G${r + 1}:M${r + 1}`).format.borders.getItem(Excel.BorderIndex.edgeTop).style = Excel.BorderLineStyle.continuous;
+        const totalPaidRow = r + 1;
+        // Same SUM range as the "with payments" branch — covers payments the
+        // user typed directly into PR#TBB (not via the Payments sheet).
+        wsTBB.getRange(`I${totalPaidRow}`).formulas = [[`=SUM(I${stRow}:I${totalPaidRow - 1})`]];
+        wsTBB.getRange(`I${totalPaidRow}`).numberFormat = [[fmt]];
+        wsTBB.getRange(`G${totalPaidRow}:M${totalPaidRow}`).format.borders.getItem(Excel.BorderIndex.edgeTop).style = Excel.BorderLineStyle.continuous;
         break;
       }
     }
@@ -1886,8 +1889,10 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const foot = ws.getRange(`I${copyTpRow}:M${copyTpRow + 2}`);
       foot.load("values");
       await context.sync();
-      const iv = foot.values[0][0];
-      ws.getRange(`I${copyTpRow}`).values = [[iv !== null ? iv : 0]];
+      // Total Paid To date on the snapshot is a live SUM down the I column
+      // from SUB-TOTALS row through every payment row, so edits to payment
+      // rows on the snapshot recompute automatically.
+      ws.getRange(`I${copyTpRow}`).formulas = [[`=SUM(I${stRow}:I${copyTpRow - 1})`]];
       const mv = foot.values[0][4];
       ws.getRange(`M${copyTpRow}`).values = [[mv !== null ? mv : 0]];
       const m1 = foot.values[1] ? foot.values[1][4] : 0;
