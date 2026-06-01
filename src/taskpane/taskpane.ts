@@ -1836,22 +1836,32 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const gRaw = invTd[idx] ? invTd[idx][0] : "";
       const gNum = gRaw !== null && gRaw !== "" ? Number(gRaw) : 0;
 
-      ws.getRange(`E${t}`).values = [[gNum === 0 ? "" : gNum]];
       ws.getRange(`F${t}`).values = [[""]];
-      ws.getRange(`G${t}`).values = [[gNum === 0 ? "" : gNum]];
-      ws.getRange(`J${t}`).values = [[jVal === "" ? "" : jVal]];
 
-      if (gNum === 0) {
+      // Row guard: blank EVERY cell unless this specific PR's column on the
+      // Invoice Worksheet has an amount for this row. Earlier the guard was
+      // based only on Total To date (gNum), so a Deposit-LCP line was still
+      // showing up on a Meeting 1 snapshot just because it had a Total To
+      // date — even though Meeting 1 had nothing to do with it.
+      if (jVal === "" || jVal === 0 || gNum === 0) {
+        ws.getRange(`E${t}`).values = [[""]];
+        ws.getRange(`G${t}`).values = [[""]];
         ws.getRange(`I${t}`).values = [[""]];
+        ws.getRange(`J${t}`).values = [[""]];
         ws.getRange(`K${t}`).values = [[""]];
         ws.getRange(`L${t}`).values = [[""]];
         ws.getRange(`M${t}`).values = [[""]];
       } else {
-        const jNum = jVal === "" ? 0 : jVal;
+        const jNum = jVal as number;
         const kNum = paidSum + jNum;
-        ws.getRange(`I${t}`).values = [[paidSum > 0 ? paidSum : ""]];
-        ws.getRange(`K${t}`).values = [[kNum > 0 ? kNum : ""]];
-        ws.getRange(`L${t}`).values = [[kNum > 0 ? kNum / gNum : ""]];
+        ws.getRange(`E${t}`).values = [[gNum]];
+        ws.getRange(`G${t}`).values = [[gNum]];
+        ws.getRange(`J${t}`).values = [[jNum]];
+        // Use !== 0 instead of > 0 so credit (negative) values are saved too —
+        // previously the > 0 guard silently dropped negative I / K / L cells.
+        ws.getRange(`I${t}`).values = [[paidSum !== 0 ? paidSum : ""]];
+        ws.getRange(`K${t}`).values = [[kNum !== 0 ? kNum : ""]];
+        ws.getRange(`L${t}`).values = [[kNum !== 0 ? kNum / gNum : ""]];
         ws.getRange(`M${t}`).values = [[gNum - kNum]];
       }
     }
