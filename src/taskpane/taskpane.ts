@@ -1839,19 +1839,32 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const gRaw = invTd[idx] ? invTd[idx][0] : "";
       const gNum = gRaw !== null && gRaw !== "" ? Number(gRaw) : 0;
 
-      ws.getRange(`E${t}`).values = [[gNum === 0 ? "" : gNum]];
       ws.getRange(`F${t}`).values = [[""]];
-      ws.getRange(`G${t}`).values = [[gNum === 0 ? "" : gNum]];
-      ws.getRange(`J${t}`).values = [[jVal === "" ? "" : jVal]];
 
-      if (gNum === 0) {
+      // Row guard: a row shows up on a PR snapshot only when this PR billed
+      // it (jVal) OR some earlier PR already billed it (paidSum). When both
+      // are zero the row is blanked — that way Meeting 1 doesn't get LCP
+      // lines (they had no prior PR), but Deposit-LCP still gets LDP lines
+      // because Deposit-LDP / Meeting 1 / Meeting 2 already billed them.
+      // Logic is fully dynamic — no PR names hard-coded anywhere.
+      const noCurrentPR = jVal === "" || jVal === 0;
+      const noPriorPR = paidSum === 0;
+      if (gNum === 0 || (noCurrentPR && noPriorPR)) {
+        ws.getRange(`E${t}`).values = [[""]];
+        ws.getRange(`G${t}`).values = [[""]];
         ws.getRange(`I${t}`).values = [[""]];
+        ws.getRange(`J${t}`).values = [[""]];
         ws.getRange(`K${t}`).values = [[""]];
         ws.getRange(`L${t}`).values = [[""]];
         ws.getRange(`M${t}`).values = [[""]];
       } else {
-        const jNum = jVal === "" ? 0 : jVal;
+        const jNum = noCurrentPR ? 0 : (jVal as number);
         const kNum = paidSum + jNum;
+        ws.getRange(`E${t}`).values = [[gNum]];
+        ws.getRange(`G${t}`).values = [[gNum]];
+        // J shows only THIS PR's contribution — blank when this PR didn't
+        // bill this row (but the row still renders because earlier PRs did).
+        ws.getRange(`J${t}`).values = [[jNum !== 0 ? jNum : ""]];
         // Use !== 0 instead of > 0 so credit (negative) values are saved too —
         // previously the > 0 guard silently dropped negative I / K / L cells.
         ws.getRange(`I${t}`).values = [[paidSum !== 0 ? paidSum : ""]];
