@@ -1692,18 +1692,23 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
 
-    wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+    // Treat a 0 in the Invoice Worksheet as "no value" too — descriptive
+    // rows like "Discussion Points" carry a numeric 0 in Total To date,
+    // which is not the same as an empty cell. The earlier guards only
+    // checked for "" so those rows were rendering $0.00 on PR#TBB even
+    // though the snapshot tabs (PR#1, PR#2, ...) correctly left them blank.
+    wsTBB.getRange(`E${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",${inv}!${tdCol}${v})`]];
     wsTBB.getRange(`F${t}`).values = [[""]];
-    wsTBB.getRange(`G${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+    wsTBB.getRange(`G${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",${inv}!${tdCol}${v})`]];
 
     if (tbbIdx !== -1 && fPRIdx !== -1) {
       if (tbbIdx === fPRIdx) {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",0)`]];
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",0)`]];
       } else {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
       }
     }
-    wsTBB.getRange(`J${t}`).formulas = [[`=IF(${inv}!${tbbC}${v}="","",${inv}!${tbbC}${v})`]];
+    wsTBB.getRange(`J${t}`).formulas = [[`=IF(OR(${inv}!${tbbC}${v}="",${inv}!${tbbC}${v}=0),"",${inv}!${tbbC}${v})`]];
     wsTBB.getRange(`K${t}`).formulas = [[`=IF(AND(I${t}="",J${t}=""),"",SUM(I${t},J${t}))`]];
     wsTBB.getRange(`L${t}`).formulas = [[`=IFERROR(K${t}/G${t},"")`]];
     wsTBB.getRange(`M${t}`).formulas = [[`=IF(OR(G${t}="",K${t}=""),"",G${t}-K${t})`]];
