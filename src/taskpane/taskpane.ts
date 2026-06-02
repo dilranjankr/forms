@@ -1928,11 +1928,13 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
         ws.getRange(`L${st.t}`).values = [[kNum !== 0 ? kNum / st.gNum : ""]];
         ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
-      } else if (st.gIsEmpty) {
-        // Kept header / sub-header where the Invoice Worksheet's Total To
-        // date is truly empty (e.g. "Original Contract - LDP", "LCP", the
-        // project sub-title). Leave column A intact and blank the rest —
-        // matches what PR#TBB shows.
+      } else if (st.isBold || st.gIsEmpty) {
+        // Bold sub-header rows ("Original Contract - LDP", "LCP", project
+        // titles like "Lot 5 Boinapalli ...") always render blank in the
+        // numeric columns regardless of whether the Invoice Worksheet
+        // formula happens to evaluate to 0 — they are not billable line
+        // items. Same blank treatment for any non-bold row whose source
+        // cell is truly empty.
         ws.getRange(`E${st.t}`).values = [[""]];
         ws.getRange(`G${st.t}`).values = [[""]];
         ws.getRange(`I${st.t}`).values = [[""]];
@@ -1941,10 +1943,10 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[""]];
       } else {
-        // Kept descriptive zero-value row — Invoice Worksheet has a numeric
-        // 0 in Total To date (e.g. "Discussion Points"). Mirror PR#TBB:
-        // E / G / I / J / K / M render as $0; L stays blank because it
-        // would be a divide-by-zero.
+        // Kept descriptive zero-value row — non-bold, Invoice Worksheet
+        // carries a literal 0 in Total To date (e.g. "Discussion Points").
+        // Mirror PR#TBB: E / G / I / J / K / M render as $0; L stays
+        // blank because it would be a divide-by-zero.
         ws.getRange(`E${st.t}`).values = [[0]];
         ws.getRange(`G${st.t}`).values = [[0]];
         ws.getRange(`I${st.t}`).values = [[0]];
