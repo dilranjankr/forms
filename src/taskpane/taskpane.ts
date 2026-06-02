@@ -1826,6 +1826,12 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     let beforeBlock: (string | number | boolean)[][] = [];
     if (pr.col > fPRIdx) beforeBlock = await readValues(context, wsInv.getRange(`${CL(fPRIdx)}5:${CL(pr.col - 1)}${grandRow - 1}`));
 
+    // Phase 1: compute every row's state without writing.
+    type RowState = {
+      t: number; isBold: boolean; gNum: number; jVal: number | "";
+      paidSum: number; hasOwnValue: boolean; keep: boolean;
+    };
+    const rowStates: RowState[] = [];
     for (let i = 0; i < dataRows.length; i++) {
       if (dataRows[i].isBlank) continue;
       const t = tbbStart + i;
@@ -1844,44 +1850,67 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const gRaw = invTd[idx] ? invTd[idx][0] : "";
       const gNum = gRaw !== null && gRaw !== "" ? Number(gRaw) : 0;
 
-      ws.getRange(`F${t}`).values = [[""]];
-
-      // Row guard: a row shows up on a PR snapshot only when this PR billed
-      // it (jVal) OR some earlier PR already billed it (paidSum). When both
-      // are zero the row is blanked — that way Meeting 1 doesn't get LCP
-      // lines (they had no prior PR), but Deposit-LCP still gets LDP lines
-      // because Deposit-LDP / Meeting 1 / Meeting 2 already billed them.
-      // Logic is fully dynamic — no PR names hard-coded anywhere.
       const noCurrentPR = jVal === "" || jVal === 0;
       const noPriorPR = paidSum === 0;
-      if (gNum === 0 || (noCurrentPR && noPriorPR)) {
-        // Clear the description too (column A is the merged A:D anchor) so
-        // the row is fully empty before we delete it below.
-        ws.getRange(`A${t}`).values = [[""]];
-        ws.getRange(`E${t}`).values = [[""]];
-        ws.getRange(`G${t}`).values = [[""]];
-        ws.getRange(`I${t}`).values = [[""]];
-        ws.getRange(`J${t}`).values = [[""]];
-        ws.getRange(`K${t}`).values = [[""]];
-        ws.getRange(`L${t}`).values = [[""]];
-        ws.getRange(`M${t}`).values = [[""]];
-        // Queue this row for removal — keeps the snapshot compact (no
-        // blank rows for line items the snapshot didn't bill).
-        blankRowsToDelete.push(t);
-      } else {
-        const jNum = noCurrentPR ? 0 : (jVal as number);
-        const kNum = paidSum + jNum;
-        ws.getRange(`E${t}`).values = [[gNum]];
-        ws.getRange(`G${t}`).values = [[gNum]];
+      const hasOwnValue = !(gNum === 0 || (noCurrentPR && noPriorPR));
+
+      rowStates.push({
+        t, isBold: dataRows[i].isBold, gNum, jVal, paidSum,
+        hasOwnValue, keep: hasOwnValue,
+      });
+    }
+
+    // Phase 2: a sub-header (bold A-column row in the Invoice Worksheet)
+    // is kept along with its content. Walk forward from each non-kept bold
+    // row until the next bold row — if any content row in between would be
+    // kept, the header rides along.
+    for (let s = 0; s < rowStates.length; s++) {
+      if (!rowStates[s].keep && rowStates[s].isBold) {
+        for (let s2 = s + 1; s2 < rowStates.length; s2++) {
+          if (rowStates[s2].isBold) break;
+          if (rowStates[s2].keep) { rowStates[s].keep = true; break; }
+        }
+      }
+    }
+
+    // Phase 3: apply the decisions.
+    for (const st of rowStates) {
+      ws.getRange(`F${st.t}`).values = [[""]];
+      if (!st.keep) {
+        // Fully blank, then queue for physical removal below.
+        ws.getRange(`A${st.t}`).values = [[""]];
+        ws.getRange(`E${st.t}`).values = [[""]];
+        ws.getRange(`G${st.t}`).values = [[""]];
+        ws.getRange(`I${st.t}`).values = [[""]];
+        ws.getRange(`J${st.t}`).values = [[""]];
+        ws.getRange(`K${st.t}`).values = [[""]];
+        ws.getRange(`L${st.t}`).values = [[""]];
+        ws.getRange(`M${st.t}`).values = [[""]];
+        blankRowsToDelete.push(st.t);
+      } else if (st.hasOwnValue) {
+        const noCurrentPR = st.jVal === "" || st.jVal === 0;
+        const jNum = noCurrentPR ? 0 : (st.jVal as number);
+        const kNum = st.paidSum + jNum;
+        ws.getRange(`E${st.t}`).values = [[st.gNum]];
+        ws.getRange(`G${st.t}`).values = [[st.gNum]];
         // J shows only THIS PR's contribution — blank when this PR didn't
         // bill this row (but the row still renders because earlier PRs did).
-        ws.getRange(`J${t}`).values = [[jNum !== 0 ? jNum : ""]];
-        // Use !== 0 instead of > 0 so credit (negative) values are saved too —
-        // previously the > 0 guard silently dropped negative I / K / L cells.
-        ws.getRange(`I${t}`).values = [[paidSum !== 0 ? paidSum : ""]];
-        ws.getRange(`K${t}`).values = [[kNum !== 0 ? kNum : ""]];
-        ws.getRange(`L${t}`).values = [[kNum !== 0 ? kNum / gNum : ""]];
-        ws.getRange(`M${t}`).values = [[gNum - kNum]];
+        ws.getRange(`J${st.t}`).values = [[jNum !== 0 ? jNum : ""]];
+        // Use !== 0 instead of > 0 so credit (negative) values flow through.
+        ws.getRange(`I${st.t}`).values = [[st.paidSum !== 0 ? st.paidSum : ""]];
+        ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
+        ws.getRange(`L${st.t}`).values = [[kNum !== 0 ? kNum / st.gNum : ""]];
+        ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
+      } else {
+        // Kept sub-header — leave the bold description in column A intact
+        // (inherited from wsTBB.copy) and blank the numeric cells.
+        ws.getRange(`E${st.t}`).values = [[""]];
+        ws.getRange(`G${st.t}`).values = [[""]];
+        ws.getRange(`I${st.t}`).values = [[""]];
+        ws.getRange(`J${st.t}`).values = [[""]];
+        ws.getRange(`K${st.t}`).values = [[""]];
+        ws.getRange(`L${st.t}`).values = [[""]];
+        ws.getRange(`M${st.t}`).values = [[""]];
       }
     }
     await context.sync();
