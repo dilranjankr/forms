@@ -1692,23 +1692,18 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
 
-    // Treat a 0 in the Invoice Worksheet as "no value" too — descriptive
-    // rows like "Discussion Points" carry a numeric 0 in Total To date,
-    // which is not the same as an empty cell. The earlier guards only
-    // checked for "" so those rows were rendering $0.00 on PR#TBB even
-    // though the snapshot tabs (PR#1, PR#2, ...) correctly left them blank.
-    wsTBB.getRange(`E${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",${inv}!${tdCol}${v})`]];
+    wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
     wsTBB.getRange(`F${t}`).values = [[""]];
-    wsTBB.getRange(`G${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",${inv}!${tdCol}${v})`]];
+    wsTBB.getRange(`G${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
 
     if (tbbIdx !== -1 && fPRIdx !== -1) {
       if (tbbIdx === fPRIdx) {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",0)`]];
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",0)`]];
       } else {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(OR(${inv}!${tdCol}${v}="",${inv}!${tdCol}${v}=0),"",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
+        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
       }
     }
-    wsTBB.getRange(`J${t}`).formulas = [[`=IF(OR(${inv}!${tbbC}${v}="",${inv}!${tbbC}${v}=0),"",${inv}!${tbbC}${v})`]];
+    wsTBB.getRange(`J${t}`).formulas = [[`=IF(${inv}!${tbbC}${v}="","",${inv}!${tbbC}${v})`]];
     wsTBB.getRange(`K${t}`).formulas = [[`=IF(AND(I${t}="",J${t}=""),"",SUM(I${t},J${t}))`]];
     wsTBB.getRange(`L${t}`).formulas = [[`=IFERROR(K${t}/G${t},"")`]];
     wsTBB.getRange(`M${t}`).formulas = [[`=IF(OR(G${t}="",K${t}=""),"",G${t}-K${t})`]];
@@ -1838,8 +1833,8 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
 
     // Phase 1: compute every row's state without writing.
     type RowState = {
-      t: number; isBold: boolean; gNum: number; jVal: number | "";
-      paidSum: number; hasOwnValue: boolean; keep: boolean;
+      t: number; isBold: boolean; gNum: number; gIsEmpty: boolean;
+      jVal: number | ""; paidSum: number; hasOwnValue: boolean; keep: boolean;
     };
     const rowStates: RowState[] = [];
     for (let i = 0; i < dataRows.length; i++) {
@@ -1858,14 +1853,20 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       }
 
       const gRaw = invTd[idx] ? invTd[idx][0] : "";
-      const gNum = gRaw !== null && gRaw !== "" ? Number(gRaw) : 0;
+      // Track whether the invoice cell is TRULY empty vs literally 0 — this
+      // is how we differentiate a bold header (Total To date is empty) from
+      // a descriptive zero-value row like "Discussion Points" (Total To date
+      // is the numeric 0). PR#TBB shows the former as blank and the latter
+      // as $0, so we mirror that on the PR snapshots too.
+      const gIsEmpty = gRaw === null || gRaw === "";
+      const gNum = gIsEmpty ? 0 : Number(gRaw);
 
       const noCurrentPR = jVal === "" || jVal === 0;
       const noPriorPR = paidSum === 0;
       const hasOwnValue = !(gNum === 0 || (noCurrentPR && noPriorPR));
 
       rowStates.push({
-        t, isBold: dataRows[i].isBold, gNum, jVal, paidSum,
+        t, isBold: dataRows[i].isBold, gNum, gIsEmpty, jVal, paidSum,
         hasOwnValue, keep: hasOwnValue,
       });
     }
@@ -1927,9 +1928,11 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
         ws.getRange(`L${st.t}`).values = [[kNum !== 0 ? kNum / st.gNum : ""]];
         ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
-      } else {
-        // Kept sub-header — leave the bold description in column A intact
-        // (inherited from wsTBB.copy) and blank the numeric cells.
+      } else if (st.gIsEmpty) {
+        // Kept header / sub-header where the Invoice Worksheet's Total To
+        // date is truly empty (e.g. "Original Contract - LDP", "LCP", the
+        // project sub-title). Leave column A intact and blank the rest —
+        // matches what PR#TBB shows.
         ws.getRange(`E${st.t}`).values = [[""]];
         ws.getRange(`G${st.t}`).values = [[""]];
         ws.getRange(`I${st.t}`).values = [[""]];
@@ -1937,6 +1940,18 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${st.t}`).values = [[""]];
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[""]];
+      } else {
+        // Kept descriptive zero-value row — Invoice Worksheet has a numeric
+        // 0 in Total To date (e.g. "Discussion Points"). Mirror PR#TBB:
+        // E / G / I / J / K / M render as $0; L stays blank because it
+        // would be a divide-by-zero.
+        ws.getRange(`E${st.t}`).values = [[0]];
+        ws.getRange(`G${st.t}`).values = [[0]];
+        ws.getRange(`I${st.t}`).values = [[0]];
+        ws.getRange(`J${st.t}`).values = [[0]];
+        ws.getRange(`K${st.t}`).values = [[0]];
+        ws.getRange(`L${st.t}`).values = [[""]];
+        ws.getRange(`M${st.t}`).values = [[0]];
       }
     }
     await context.sync();
