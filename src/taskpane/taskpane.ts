@@ -1812,6 +1812,11 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
 
     const prVals = await readValues(context, wsInv.getRange(`${CL(pr.col)}5:${CL(pr.col)}${grandRow - 1}`));
 
+    // Track snapshot rows that should be removed entirely (this PR + every
+    // earlier PR had nothing for them). Filled inside the per-row loop and
+    // applied after SUB-TOTALS / footer freezing so cell references auto-adjust.
+    const blankRowsToDelete: number[] = [];
+
     // PR columns before this one
     const prsBefore: number[] = [];
     for (let c = fPRIdx; c < pr.col; c++) {
@@ -1851,7 +1856,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const noPriorPR = paidSum === 0;
       if (gNum === 0 || (noCurrentPR && noPriorPR)) {
         // Clear the description too (column A is the merged A:D anchor) so
-        // line items that this snapshot didn't bill don't leak through.
+        // the row is fully empty before we delete it below.
         ws.getRange(`A${t}`).values = [[""]];
         ws.getRange(`E${t}`).values = [[""]];
         ws.getRange(`G${t}`).values = [[""]];
@@ -1860,6 +1865,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${t}`).values = [[""]];
         ws.getRange(`L${t}`).values = [[""]];
         ws.getRange(`M${t}`).values = [[""]];
+        // Queue this row for removal — keeps the snapshot compact (no
+        // blank rows for line items the snapshot didn't bill).
+        blankRowsToDelete.push(t);
       } else {
         const jNum = noCurrentPR ? 0 : (jVal as number);
         const kNum = paidSum + jNum;
@@ -1909,6 +1917,18 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       ws.getRange(`M${copyTpRow + 2}`).values = [[m2 !== null ? m2 : 0]];
     }
     await context.sync();
+
+    // Finally, physically remove the rows we blanked above. Done LAST so the
+    // SUB-TOTALS and the Total Paid SUM formula are already in place — Excel
+    // adjusts their row references automatically as rows shift up. Deleted in
+    // descending order so earlier deletions don't invalidate later indices.
+    if (blankRowsToDelete.length > 0) {
+      blankRowsToDelete.sort((a, b) => b - a);
+      for (const row of blankRowsToDelete) {
+        ws.getRange(`${row}:${row}`).delete(Excel.DeleteShiftDirection.up);
+      }
+      await context.sync();
+    }
   }
 
   wsTBB.activate();
