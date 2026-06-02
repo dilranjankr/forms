@@ -1865,16 +1865,32 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       });
     }
 
-    // Phase 2: a sub-header (bold A-column row in the Invoice Worksheet)
-    // is kept along with its content. Walk forward from each non-kept bold
-    // row until the next bold row — if any content row in between would be
-    // kept, the header rides along.
-    for (let s = 0; s < rowStates.length; s++) {
-      if (!rowStates[s].keep && rowStates[s].isBold) {
-        for (let s2 = s + 1; s2 < rowStates.length; s2++) {
-          if (rowStates[s2].isBold) break;
-          if (rowStates[s2].keep) { rowStates[s].keep = true; break; }
+    // Phase 2: group-based keep decision. A "group" is a (possibly empty)
+    // cluster of consecutive bold sub-header rows followed by the non-bold
+    // rows below it, up to the next bold cluster. If any row in the group
+    // has value, the entire group is kept — that pulls in the LDP / LCP
+    // headers, sub-titles like "Lot 5 Boinapalli Landscape Construction
+    // Proposal", AND descriptive zero-value rows (e.g. "Discussion Points")
+    // that belong to a section that's actually being billed.
+    {
+      let p = 0;
+      while (p < rowStates.length) {
+        const clusterStart = p;
+        while (p < rowStates.length && rowStates[p].isBold) p++;
+        const contentEnd_ = (function () {
+          let q = p;
+          while (q < rowStates.length && !rowStates[q].isBold) q++;
+          return q;
+        })();
+        const groupEnd = contentEnd_;
+        let anyValue = false;
+        for (let k = clusterStart; k < groupEnd; k++) {
+          if (rowStates[k].hasOwnValue) { anyValue = true; break; }
         }
+        for (let k = clusterStart; k < groupEnd; k++) {
+          rowStates[k].keep = anyValue;
+        }
+        p = groupEnd;
       }
     }
 
