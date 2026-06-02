@@ -1692,21 +1692,32 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // (The previous explicit border-removal here wiped the borders inherited from
     // the template row above — keep the template's borders intact.)
 
-    wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
-    wsTBB.getRange(`F${t}`).values = [[""]];
-    wsTBB.getRange(`G${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+    // Bold sub-header rows (e.g. "Original Contract - LDP", "LCP", "Lot 5
+    // Boinapalli Landscape Construction Proposal") are section titles —
+    // they shouldn't carry numeric values OR formulas. Earlier the same
+    // formulas were written for every row, and bold headers ended up
+    // showing $0 on PR#TBB because the Invoice Worksheet's Total To date
+    // formula evaluated to 0 (SUM of an empty range). Skip them entirely
+    // for bold rows; only the description in column A is kept.
+    if (dataRows[i].isBold) {
+      wsTBB.getRange(`E${t}:M${t}`).clear(Excel.ClearApplyTo.contents);
+    } else {
+      wsTBB.getRange(`E${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
+      wsTBB.getRange(`F${t}`).values = [[""]];
+      wsTBB.getRange(`G${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",${inv}!${tdCol}${v})`]];
 
-    if (tbbIdx !== -1 && fPRIdx !== -1) {
-      if (tbbIdx === fPRIdx) {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",0)`]];
-      } else {
-        wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
+      if (tbbIdx !== -1 && fPRIdx !== -1) {
+        if (tbbIdx === fPRIdx) {
+          wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",0)`]];
+        } else {
+          wsTBB.getRange(`I${t}`).formulas = [[`=IF(${inv}!${tdCol}${v}="","",SUMIFS(${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},${inv}!$${fPR}${v}:$${CL(tbbIdx - 1)}${v},"<>"&""))`]];
+        }
       }
+      wsTBB.getRange(`J${t}`).formulas = [[`=IF(${inv}!${tbbC}${v}="","",${inv}!${tbbC}${v})`]];
+      wsTBB.getRange(`K${t}`).formulas = [[`=IF(AND(I${t}="",J${t}=""),"",SUM(I${t},J${t}))`]];
+      wsTBB.getRange(`L${t}`).formulas = [[`=IFERROR(K${t}/G${t},"")`]];
+      wsTBB.getRange(`M${t}`).formulas = [[`=IF(OR(G${t}="",K${t}=""),"",G${t}-K${t})`]];
     }
-    wsTBB.getRange(`J${t}`).formulas = [[`=IF(${inv}!${tbbC}${v}="","",${inv}!${tbbC}${v})`]];
-    wsTBB.getRange(`K${t}`).formulas = [[`=IF(AND(I${t}="",J${t}=""),"",SUM(I${t},J${t}))`]];
-    wsTBB.getRange(`L${t}`).formulas = [[`=IFERROR(K${t}/G${t},"")`]];
-    wsTBB.getRange(`M${t}`).formulas = [[`=IF(OR(G${t}="",K${t}=""),"",G${t}-K${t})`]];
   }
   await context.sync();
 
