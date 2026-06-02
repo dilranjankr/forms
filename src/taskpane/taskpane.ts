@@ -1621,8 +1621,13 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   if (hasPay) {
     const pd = await readValues(context, wsPay.getRange("A2:C50"));
     for (const r of pd) {
-      if (r[0] === null && (r[1] === null || r[1] === "") && (r[2] === null || r[2] === "")) break;
-      if (r[0] !== null && r[2] !== null && r[2] !== "") payments.push({ date: r[0], ptype: r[1] ? String(r[1]).trim() : "", amount: Number(r[2]) });
+      // Just skip empty rows instead of breaking on them — earlier the loop
+      // bailed at the first blank row, so any payment the user added BELOW a
+      // gap in the Payments sheet was silently ignored. Now we scan the whole
+      // A2:C50 range and only keep rows that have both a date and an amount.
+      if (r[0] !== null && r[0] !== "" && r[2] !== null && r[2] !== "" && !isNaN(Number(r[2]))) {
+        payments.push({ date: r[0], ptype: r[1] ? String(r[1]).trim() : "", amount: Number(r[2]) });
+      }
     }
   }
 
