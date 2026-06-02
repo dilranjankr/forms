@@ -1850,6 +1850,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const noCurrentPR = jVal === "" || jVal === 0;
       const noPriorPR = paidSum === 0;
       if (gNum === 0 || (noCurrentPR && noPriorPR)) {
+        // Clear the description too (column A is the merged A:D anchor) so
+        // line items that this snapshot didn't bill don't leak through.
+        ws.getRange(`A${t}`).values = [[""]];
         ws.getRange(`E${t}`).values = [[""]];
         ws.getRange(`G${t}`).values = [[""]];
         ws.getRange(`I${t}`).values = [[""]];
