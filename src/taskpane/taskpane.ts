@@ -1287,21 +1287,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (a.includes("Sub-Contractor Total")) subContRow = r + 5;
   }
 
-  // Pre-scan once: position of LDP Total / PR#TBB / LCP Total in the header,
-  // and the "Project Indicators are Below" row used for footer formula copy.
-  // Previously every missing PR re-read these (4-5 syncs each), so 5 new PRs
-  // cost ~20+ syncs (~2-3 seconds). Now everything is queued and committed in
-  // one final sync at the end of the loop.
-  let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
-  {
-    const cur0 = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
-    for (let c = 0; c < cur0.length; c++) {
-      const h = cur0[c] ? String(cur0[c]).trim() : "";
-      if (h === "LDP Total") curLDPTot = c;
-      if (h.toUpperCase().includes("TBB")) curTBB = c;
-      if (h === "LCP Total") curLCPTot = c;
-    }
-  }
+  // Pre-scan the "Project Indicators are Below" row once (it never shifts
+  // because all PR inserts happen ABOVE that row band). Header position
+  // (LDP Total / PR#TBB / LCP Total) is re-read each iteration so it
+  // reflects the post-insert state of the previous loop iteration.
   let indicRow = -1;
   {
     const scanVT = await readValues(context, wsVT.getRange("A1:Z60"));
@@ -1316,6 +1305,14 @@ async function runUpdatePR(context: Excel.RequestContext) {
   const indicLastRow = indicRow + 25;
 
   for (const pr of missing) {
+    const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
+    let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
+    for (let c = 0; c < cur.length; c++) {
+      const h = cur[c] ? String(cur[c]).trim() : "";
+      if (h === "LDP Total") curLDPTot = c;
+      if (h.toUpperCase().includes("TBB")) curTBB = c;
+      if (h === "LCP Total") curLCPTot = c;
+    }
     // Payment Requests always belong in the LCP / PR#TBB area — insert before PR#TBB (never before LDP Total)
     let insertAt = -1;
     if (curTBB !== -1) insertAt = curTBB;
@@ -1324,7 +1321,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (insertAt === -1) continue;
     const col = CL(insertAt);
     wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
-
+    await context.sync();
     // Drop the bad inherited stuff (formulas / values / yellow fill / conditional formats)
     // but KEEP borders / font / number-format so the column still looks bordered.
     const newCol = wsVT.getRange(`${col}1:${col}100`);
@@ -1344,16 +1341,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
       wsVT.getRange(`${CL(tbbColIdx)}${indicRow}:${CL(tbbColIdx)}${indicLastRow}`),
       Excel.RangeCopyType.formulas
     );
-
-    // Shift tracked column positions to reflect the just-queued insert so the
-    // next iteration lands at the correct (post-shift) PR#TBB column.
-    if (curLDPTot !== -1 && curLDPTot >= insertAt) curLDPTot++;
-    if (curTBB !== -1 && curTBB >= insertAt) curTBB++;
-    if (curLCPTot !== -1 && curLCPTot >= insertAt) curLCPTot++;
+    await context.sync();
   }
-  // One sync committing every queued insert + write + copyFrom for the whole
-  // batch — drops per-PR sync cost from ~3-5 down to ~0.
-  if (missing.length > 0) await context.sync();
 
   const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
 
