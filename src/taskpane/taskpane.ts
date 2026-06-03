@@ -539,6 +539,8 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   await context.sync();
   if (wsInv.isNullObject) throw new Error("'LDP & LCP - Invoice Worksheet' not found.");
 
+  const invLast = await getSafeLastRow(context, wsInv, 100);
+
   let hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
   let hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0];
 
@@ -644,7 +646,7 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   }
   const tgtCol = CL(targetIdx);
 
-  let colA = await readValues(context, wsInv.getRange("A1:A500"));
+  let colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1, ldpSubRow = -1, lcpSubRow = -1, lcpHdrRow = -1;
   for (let r = 4; r < colA.length; r++) {
     const a = colA[r][0] ? String(colA[r][0]).trim() : "";
@@ -675,7 +677,7 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
         wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
         grandRow++;
-        colA = await readValues(context, wsInv.getRange("A1:A500"));
+        colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
       }
     }
     await updateAllFormulas(context, wsInv, grandRow, tdIdx, firstPRIdx, lastPRIdx, paidIdx, compIdx, pctIdx, balIdx, lcpHdrRow, ldpSubRow, lcpSubRow);
@@ -769,7 +771,8 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
   await context.sync();
   if (wsPR.isNullObject) return;
 
-  let colA = await readValues(context, wsPR.getRange("A1:A300"));
+  const prLast = await getSafeLastRow(context, wsPR, 60);
+  let colA = await readValues(context, wsPR.getRange(`A1:A${prLast}`));
   let subTotalRow = -1;
   for (let r = 0; r < colA.length; r++) {
     const a = colA[r][0] ? String(colA[r][0]).trim().toUpperCase().replace(/\s+/g, "") : "";
@@ -782,7 +785,7 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
     const desc = item.desc ? String(item.desc).trim() : "";
     if (desc === "") continue;
 
-    colA = await readValues(context, wsPR.getRange("A1:A300"));
+    colA = await readValues(context, wsPR.getRange(`A1:A${prLast}`));
     let targetRow = -1;
     for (let r = descStart - 1; r < subTotalRow - 1; r++) {
       const v = colA[r] ? colA[r][0] : "";
@@ -831,7 +834,8 @@ async function addVendorTrackingRow(
   if (secType === "Payment Request") return;
   const contractName = secHeader !== "" ? secHeader : colName;
 
-  const vtAE = await readValues(context, ws.getRange("A5:E80")); // A..E for rows 5..80
+  const vtLast = await getSafeLastRow(context, ws, 80);
+  const vtAE = await readValues(context, ws.getRange(`A5:E${vtLast}`));
   let lastDataRow = 6, clientTotalRow = -1, lcpAnalysisRow = -1, ldpMarkerRow = -1, lcpMarkerRow = -1;
 
   for (let r = 0; r < vtAE.length; r++) {
@@ -1008,7 +1012,8 @@ function writeClientTotalFormulas(ws: Excel.Worksheet, s: VtSections): void {
 }
 
 async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Worksheet) {
-  const vtA = await readValues(context, ws.getRange("A5:A300"));
+  const vtLast = await getSafeLastRow(context, ws, 80);
+  const vtA = await readValues(context, ws.getRange(`A5:A${vtLast}`));
   const s = scanVtSections(vtA);
   writeClientTotalFormulas(ws, s);
   await context.sync();
@@ -1118,7 +1123,8 @@ async function updateAllFormulas(
   const pCol = pctIdx !== -1 ? CL(pctIdx) : "";
   const bCol = balIdx !== -1 ? CL(balIdx) : "";
 
-  const colA = await readValues(context, ws.getRange("A1:A500"));
+  const wsLast = await getSafeLastRow(context, ws, 100);
+  const colA = await readValues(context, ws.getRange(`A1:A${wsLast}`));
 
   for (let r = 5; r <= grandRow - 1; r++) {
     const a = colA[r - 1][0] ? String(colA[r - 1][0]).trim() : "";
@@ -1220,7 +1226,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
   if (tdIdx === -1) throw new Error("Total To date not found.");
 
-  const invA = await readValues(context, wsInv.getRange("A1:A500"));
+  const invLast = await getSafeLastRow(context, wsInv, 100);
+  const invA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1, lcpHdrRow = -1;
   for (let r = 4; r < invA.length; r++) {
     const a = invA[r][0] ? String(invA[r][0]).trim() : "";
@@ -1265,7 +1272,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
   // .reverse() = create right-to-left.
   const missing = invPRs.filter((p) => p.isLCP && !vtExist.has(p.name)).reverse();
 
-  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
+  const vtLast = await getSafeLastRow(context, wsVT, 80);
+  const vtA = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
   let clientRow = -1, subContRow = -1;
   for (let r = 0; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
@@ -1407,7 +1415,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   for (let c = 0; c < fin.length; c++) { if (fin[c] && String(fin[c]).trim() === "PO Total") nPO = c; }
   if (nPO !== -1) {
     const po = CL(nPO);
-    const vtAr = await readValues(context, wsVT.getRange("A5:A300"));
+    const vtAr = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
     const vtB = await readValues(context, wsVT.getRange("B5:B60"));
     // Classify contracts by the bold "LDP"/"LCP" marker rows (NOT by contract name —
     // the LCP contract name may not contain "LCP")
@@ -1488,7 +1496,8 @@ async function runGetPR(context: Excel.RequestContext): Promise<{ desc: string; 
   if (tdIdx === -1) throw new Error("'Total To date' not found.");
   if (prTBBIdx === -1) throw new Error("'PR#TBB' column not found.");
 
-  const colA = await readValues(context, wsInv.getRange("A1:A500"));
+  const invLast = await getSafeLastRow(context, wsInv, 100);
+  const colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1;
   for (let r = 4; r < colA.length; r++) {
     if (colA[r][0] && String(colA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; }
@@ -2224,15 +2233,17 @@ async function poDoMove(context: Excel.RequestContext, wsVT: Excel.Worksheet, so
 }
 
 async function updateClientTotal(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
-  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
+  const vtLast = await getSafeLastRow(context, wsVT, 80);
+  const vtA = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
   const s = scanVtSections(vtA);
   writeClientTotalFormulas(wsVT, s);
   await context.sync();
 }
 
 async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksheet, contract: string): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A300"));
-  const vtE = await readValues(context, ws.getRange("E5:E80"));
+  const vtLast = await getSafeLastRow(context, ws, 80);
+  const vtA = await readValues(context, ws.getRange(`A5:A${vtLast}`));
+  const vtE = await readValues(context, ws.getRange(`E5:E${vtLast}`));
   if (contract === "Without Estimate") {
     for (let r = 0; r < vtA.length; r++) { if (vtA[r][0] && String(vtA[r][0]).trim() === "Without Estimate") return r + 5; }
     return -1;
@@ -2242,8 +2253,9 @@ async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksh
 }
 
 async function poFindInsertAfter(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A300"));
-  const vtE = await readValues(context, ws.getRange("E5:E80"));
+  const vtLast = await getSafeLastRow(context, ws, 80);
+  const vtA = await readValues(context, ws.getRange(`A5:A${vtLast}`));
+  const vtE = await readValues(context, ws.getRange(`E5:E${vtLast}`));
   let lastRow = contractRow;
   for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
@@ -2256,7 +2268,8 @@ async function poFindInsertAfter(context: Excel.RequestContext, ws: Excel.Worksh
 }
 
 async function poFindVendorRow(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number, vendorName: string): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A300"));
+  const vtLast = await getSafeLastRow(context, ws, 80);
+  const vtA = await readValues(context, ws.getRange(`A5:A${vtLast}`));
   for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
     if (a === "" && r > contractRow - 5 + 2) break;
@@ -2274,9 +2287,10 @@ async function runLoadMove(context: Excel.RequestContext, source: string): Promi
   await context.sync();
   if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
 
-  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
-  const vtE = await readValues(context, wsVT.getRange("E5:E80"));
-  const fg = await readValues(context, wsVT.getRange("F5:G80")); // F=amount, G=adj
+  const vtLast = await getSafeLastRow(context, wsVT, 80);
+  const vtA = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
+  const vtE = await readValues(context, wsVT.getRange(`E5:E${vtLast}`));
+  const fg = await readValues(context, wsVT.getRange(`F5:G${vtLast}`)); // F=amount, G=adj
 
   let srcRow = -1;
   if (source === "Without Estimate" || source === "Unknown") {
@@ -2316,7 +2330,8 @@ async function runContractAdjust(context: Excel.RequestContext, poNumber: string
 
   const finalAmount = -Math.abs(adjustment);
 
-  const vtE = await readValues(context, wsVT.getRange("E5:E100"));
+  const vtLast = await getSafeLastRow(context, wsVT, 100);
+  const vtE = await readValues(context, wsVT.getRange(`E5:E${vtLast}`));
   let poRow = -1;
   for (let r = 0; r < vtE.length; r++) {
     const e = vtE[r][0] ? String(vtE[r][0]).trim() : "";
