@@ -1353,13 +1353,23 @@ async function runUpdatePR(context: Excel.RequestContext) {
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
 
-    // Mirror PR#TBB's bottom-row formulas (column totals + Project Indicator
-    // rows like Total Cost LCP / Cost Percentage / Total Left to Pay Vendors)
-    // into the new PR column. Excel's formulas-only paste-special adjusts
-    // relative column references automatically.
+    // Mirror PR#TBB's formulas (per-vendor rows + sub-contractor / client
+    // totals + Project Indicator rows like Total Cost LCP / Cost Percentage
+    // / Total Left to Pay Vendors) into the new PR column. Excel's
+    // formulas-only paste-special adjusts relative column references
+    // automatically — and because the Invoice Worksheet also got a column
+    // inserted just before PR#TBB at the same time, the -1 column shift
+    // from PR#TBB-VT to the new PR-VT correctly lands on the new PR
+    // column in the Invoice Worksheet.
+    //
+    // Previously this copyFrom started at indicRow (~row 23) which left
+    // the per-vendor band (row 7 → indicRow-1) BLANK in the new PR
+    // column. Now we copy from row 7 so vendor cells inherit the same
+    // formula shape (SUMIF / direct reference to Invoice) that PR#TBB
+    // uses, just retargeted to the new PR column.
     const tbbColIdx = insertAt + 1; // PR#TBB shifted right by 1 after the insert above
-    wsVT.getRange(`${col}${indicRow}:${col}${indicLastRow}`).copyFrom(
-      wsVT.getRange(`${CL(tbbColIdx)}${indicRow}:${CL(tbbColIdx)}${indicLastRow}`),
+    wsVT.getRange(`${col}7:${col}${indicLastRow}`).copyFrom(
+      wsVT.getRange(`${CL(tbbColIdx)}7:${CL(tbbColIdx)}${indicLastRow}`),
       Excel.RangeCopyType.formulas
     );
     await context.sync();
