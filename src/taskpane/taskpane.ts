@@ -1287,15 +1287,35 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (a.includes("Sub-Contractor Total")) subContRow = r + 5;
   }
 
-  for (const pr of missing) {
-    const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
-    let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
-    for (let c = 0; c < cur.length; c++) {
-      const h = cur[c] ? String(cur[c]).trim() : "";
+  // Pre-scan once: position of LDP Total / PR#TBB / LCP Total in the header,
+  // and the "Project Indicators are Below" row used for footer formula copy.
+  // Previously every missing PR re-read these (4-5 syncs each), so 5 new PRs
+  // cost ~20+ syncs (~2-3 seconds). Now everything is queued and committed in
+  // one final sync at the end of the loop.
+  let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
+  {
+    const cur0 = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
+    for (let c = 0; c < cur0.length; c++) {
+      const h = cur0[c] ? String(cur0[c]).trim() : "";
       if (h === "LDP Total") curLDPTot = c;
       if (h.toUpperCase().includes("TBB")) curTBB = c;
       if (h === "LCP Total") curLCPTot = c;
     }
+  }
+  let indicRow = -1;
+  {
+    const scanVT = await readValues(context, wsVT.getRange("A1:Z60"));
+    for (let r = 0; r < scanVT.length && indicRow === -1; r++) {
+      for (let cc = 0; cc < scanVT[r].length; cc++) {
+        const v = scanVT[r][cc] ? String(scanVT[r][cc]).trim().toLowerCase() : "";
+        if (v.indexOf("project indicators") !== -1) { indicRow = r + 1; break; }
+      }
+    }
+    if (indicRow === -1) indicRow = 23;
+  }
+  const indicLastRow = indicRow + 25;
+
+  for (const pr of missing) {
     // Payment Requests always belong in the LCP / PR#TBB area — insert before PR#TBB (never before LDP Total)
     let insertAt = -1;
     if (curTBB !== -1) insertAt = curTBB;
@@ -1304,7 +1324,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (insertAt === -1) continue;
     const col = CL(insertAt);
     wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
-    await context.sync();
+
     // Drop the bad inherited stuff (formulas / values / yellow fill / conditional formats)
     // but KEEP borders / font / number-format so the column still looks bordered.
     const newCol = wsVT.getRange(`${col}1:${col}100`);
@@ -1314,29 +1334,26 @@ async function runUpdatePR(context: Excel.RequestContext) {
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
-    await context.sync();
 
-    // Mirror PR#TBB's bottom-row formulas (column totals + Project Indicator rows like
-    // Total Cost LCP / Cost Percentage / Total Left to Pay Vendors) into the new PR column.
-    // Excel's formulas-only paste-special adjusts relative column references automatically,
-    // so SUM/ratio formulas retarget to the new column.
+    // Mirror PR#TBB's bottom-row formulas (column totals + Project Indicator
+    // rows like Total Cost LCP / Cost Percentage / Total Left to Pay Vendors)
+    // into the new PR column. Excel's formulas-only paste-special adjusts
+    // relative column references automatically.
     const tbbColIdx = insertAt + 1; // PR#TBB shifted right by 1 after the insert above
-    let indicRow = -1;
-    const scanVT = await readValues(context, wsVT.getRange("A1:Z60"));
-    for (let r = 0; r < scanVT.length && indicRow === -1; r++) {
-      for (let cc = 0; cc < scanVT[r].length; cc++) {
-        const v = scanVT[r][cc] ? String(scanVT[r][cc]).trim().toLowerCase() : "";
-        if (v.indexOf("project indicators") !== -1) { indicRow = r + 1; break; }
-      }
-    }
-    if (indicRow === -1) indicRow = 23; // safe fallback
-    const lastRow = indicRow + 25;
-    wsVT.getRange(`${col}${indicRow}:${col}${lastRow}`).copyFrom(
-      wsVT.getRange(`${CL(tbbColIdx)}${indicRow}:${CL(tbbColIdx)}${lastRow}`),
+    wsVT.getRange(`${col}${indicRow}:${col}${indicLastRow}`).copyFrom(
+      wsVT.getRange(`${CL(tbbColIdx)}${indicRow}:${CL(tbbColIdx)}${indicLastRow}`),
       Excel.RangeCopyType.formulas
     );
-    await context.sync();
+
+    // Shift tracked column positions to reflect the just-queued insert so the
+    // next iteration lands at the correct (post-shift) PR#TBB column.
+    if (curLDPTot !== -1 && curLDPTot >= insertAt) curLDPTot++;
+    if (curTBB !== -1 && curTBB >= insertAt) curTBB++;
+    if (curLCPTot !== -1 && curLCPTot >= insertAt) curLCPTot++;
   }
+  // One sync committing every queued insert + write + copyFrom for the whole
+  // batch — drops per-PR sync cost from ~3-5 down to ~0.
+  if (missing.length > 0) await context.sync();
 
   const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
 
