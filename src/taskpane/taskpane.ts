@@ -513,6 +513,22 @@ async function readValues(context: Excel.RequestContext, range: Excel.Range): Pr
   return range.values as (string | number | boolean)[][];
 }
 
+// Returns max(actual usedRange last row, fallback) so existing hard-coded
+// scan limits stay intact for normal workbooks but extend automatically when
+// a project has more rows than the original limit. Adds one sync per call.
+async function getSafeLastRow(context: Excel.RequestContext, ws: Excel.Worksheet, fallback: number): Promise<number> {
+  try {
+    const used = ws.getUsedRangeOrNullObject();
+    used.load("rowIndex,rowCount,isNullObject");
+    await context.sync();
+    if (used.isNullObject || !used.rowCount) return fallback;
+    const actual = (used.rowIndex || 0) + (used.rowCount || 0);
+    return Math.max(actual, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
 // ───────────────────────── Main port (Run Input Form) ─────────────────────────
 
 async function runInputForm(context: Excel.RequestContext, form: InputFormData) {
@@ -628,9 +644,9 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   }
   const tgtCol = CL(targetIdx);
 
-  let colA = await readValues(context, wsInv.getRange("A1:A100"));
+  let colA = await readValues(context, wsInv.getRange("A1:A500"));
   let grandRow = -1, ldpSubRow = -1, lcpSubRow = -1, lcpHdrRow = -1;
-  for (let r = 4; r < 100; r++) {
+  for (let r = 4; r < colA.length; r++) {
     const a = colA[r][0] ? String(colA[r][0]).trim() : "";
     if (a === "Grand - TOTALS") grandRow = r + 1;
     if (a === "SUB - TOTALS - LDP") ldpSubRow = r + 1;
@@ -659,7 +675,7 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
         wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
         grandRow++;
-        colA = await readValues(context, wsInv.getRange("A1:A100"));
+        colA = await readValues(context, wsInv.getRange("A1:A500"));
       }
     }
     await updateAllFormulas(context, wsInv, grandRow, tdIdx, firstPRIdx, lastPRIdx, paidIdx, compIdx, pctIdx, balIdx, lcpHdrRow, ldpSubRow, lcpSubRow);
@@ -753,7 +769,7 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
   await context.sync();
   if (wsPR.isNullObject) return;
 
-  let colA = await readValues(context, wsPR.getRange("A1:A60"));
+  let colA = await readValues(context, wsPR.getRange("A1:A300"));
   let subTotalRow = -1;
   for (let r = 0; r < colA.length; r++) {
     const a = colA[r][0] ? String(colA[r][0]).trim().toUpperCase().replace(/\s+/g, "") : "";
@@ -766,7 +782,7 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
     const desc = item.desc ? String(item.desc).trim() : "";
     if (desc === "") continue;
 
-    colA = await readValues(context, wsPR.getRange("A1:A60"));
+    colA = await readValues(context, wsPR.getRange("A1:A300"));
     let targetRow = -1;
     for (let r = descStart - 1; r < subTotalRow - 1; r++) {
       const v = colA[r] ? colA[r][0] : "";
@@ -992,7 +1008,7 @@ function writeClientTotalFormulas(ws: Excel.Worksheet, s: VtSections): void {
 }
 
 async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Worksheet) {
-  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtA = await readValues(context, ws.getRange("A5:A300"));
   const s = scanVtSections(vtA);
   writeClientTotalFormulas(ws, s);
   await context.sync();
@@ -1102,7 +1118,7 @@ async function updateAllFormulas(
   const pCol = pctIdx !== -1 ? CL(pctIdx) : "";
   const bCol = balIdx !== -1 ? CL(balIdx) : "";
 
-  const colA = await readValues(context, ws.getRange("A1:A100"));
+  const colA = await readValues(context, ws.getRange("A1:A500"));
 
   for (let r = 5; r <= grandRow - 1; r++) {
     const a = colA[r - 1][0] ? String(colA[r - 1][0]).trim() : "";
@@ -1204,9 +1220,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
   if (tdIdx === -1) throw new Error("Total To date not found.");
 
-  const invA = await readValues(context, wsInv.getRange("A1:A100"));
+  const invA = await readValues(context, wsInv.getRange("A1:A500"));
   let grandRow = -1, lcpHdrRow = -1;
-  for (let r = 4; r < 100; r++) {
+  for (let r = 4; r < invA.length; r++) {
     const a = invA[r][0] ? String(invA[r][0]).trim() : "";
     if (a === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
     if (a === "Grand - TOTALS") { grandRow = r + 1; break; }
@@ -1249,7 +1265,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   // .reverse() = create right-to-left.
   const missing = invPRs.filter((p) => p.isLCP && !vtExist.has(p.name)).reverse();
 
-  const vtA = await readValues(context, wsVT.getRange("A5:A60"));
+  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
   let clientRow = -1, subContRow = -1;
   for (let r = 0; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
@@ -1391,7 +1407,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   for (let c = 0; c < fin.length; c++) { if (fin[c] && String(fin[c]).trim() === "PO Total") nPO = c; }
   if (nPO !== -1) {
     const po = CL(nPO);
-    const vtAr = await readValues(context, wsVT.getRange("A5:A60"));
+    const vtAr = await readValues(context, wsVT.getRange("A5:A300"));
     const vtB = await readValues(context, wsVT.getRange("B5:B60"));
     // Classify contracts by the bold "LDP"/"LCP" marker rows (NOT by contract name —
     // the LCP contract name may not contain "LCP")
@@ -1472,9 +1488,9 @@ async function runGetPR(context: Excel.RequestContext): Promise<{ desc: string; 
   if (tdIdx === -1) throw new Error("'Total To date' not found.");
   if (prTBBIdx === -1) throw new Error("'PR#TBB' column not found.");
 
-  const colA = await readValues(context, wsInv.getRange("A1:A100"));
+  const colA = await readValues(context, wsInv.getRange("A1:A500"));
   let grandRow = -1;
-  for (let r = 4; r < 100; r++) {
+  for (let r = 4; r < colA.length; r++) {
     if (colA[r][0] && String(colA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; }
   }
   if (grandRow === -1) throw new Error("Grand Totals not found.");
@@ -1565,10 +1581,16 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   const existingNames = new Set(sheets.items.map((s) => s.name));
   const toCreate = allPRs.filter((pr) => !existingNames.has(pr.name));
 
+  // Dynamic row-count discovery — keeps the original 100/80/60/50 fallbacks
+  // for normal workbooks but auto-expands when a project has more rows.
+  const invLast = await getSafeLastRow(context, wsInv, 100);
+  const tbbLast = await getSafeLastRow(context, wsTBB, 80);
+  const payLast = hasPay ? await getSafeLastRow(context, wsPay, 50) : 50;
+
   // Grand Totals
-  const invA = await readValues(context, wsInv.getRange("A1:A100"));
+  const invA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1;
-  for (let r = 4; r < 100; r++) { if (invA[r][0] && String(invA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; } }
+  for (let r = 4; r < invA.length; r++) { if (invA[r][0] && String(invA[r][0]).trim() === "Grand - TOTALS") { grandRow = r + 1; break; } }
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
   // Bold detection (queue all font loads, one sync)
@@ -1606,7 +1628,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   const tbbC = tbbIdx !== -1 ? CL(tbbIdx) : "";
 
   // Template structure
-  const tbbA = await readValues(context, wsTBB.getRange("A1:A60"));
+  const tbbA = await readValues(context, wsTBB.getRange(`A1:A${tbbLast}`));
   const tbbStart = 7;
   let tbbSubRow = -1;
   for (let r = 0; r < tbbA.length; r++) {
@@ -1619,7 +1641,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   // Payments
   const payments: { date: string | number | boolean; ptype: string; amount: number }[] = [];
   if (hasPay) {
-    const pd = await readValues(context, wsPay.getRange("A2:C50"));
+    const pd = await readValues(context, wsPay.getRange(`A2:C${Math.max(payLast, 50)}`));
     for (const r of pd) {
       // Just skip empty rows instead of breaking on them — earlier the loop
       // bailed at the first blank row, so any payment the user added BELOW a
@@ -1743,8 +1765,8 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   await context.sync();
 
   // Invoiced to Date + Payments
-  let tbbFullA = await readValues(context, wsTBB.getRange("A1:A80"));
-  let tbbFullG = await readValues(context, wsTBB.getRange("G1:G80"));
+  let tbbFullA = await readValues(context, wsTBB.getRange(`A1:A${tbbLast}`));
+  let tbbFullG = await readValues(context, wsTBB.getRange(`G1:G${tbbLast}`));
   let existInvToDt = -1;
   for (let r = 0; r < tbbFullA.length; r++) {
     const a = tbbFullA[r][0] ? String(tbbFullA[r][0]).trim() : "";
@@ -1758,7 +1780,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   }
 
   if (payments.length > 0) {
-    let g = await readValues(context, wsTBB.getRange("G1:G80"));
+    let g = await readValues(context, wsTBB.getRange(`G1:G${tbbLast}`));
     let curTotalPaid = -1;
     for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { curTotalPaid = r + 1; break; } }
     if (curTotalPaid !== -1) {
@@ -1768,7 +1790,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         await context.sync();
       }
     }
-    g = await readValues(context, wsTBB.getRange("G1:G80"));
+    g = await readValues(context, wsTBB.getRange(`G1:G${tbbLast}`));
     let newTotalPaid = -1;
     for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { newTotalPaid = r + 1; break; } }
     if (newTotalPaid !== -1) {
@@ -1793,7 +1815,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       await context.sync();
     }
   } else {
-    const g = await readValues(context, wsTBB.getRange("G1:G80"));
+    const g = await readValues(context, wsTBB.getRange(`G1:G${tbbLast}`));
     for (let r = 0; r < g.length; r++) {
       if (g[r][0] && String(g[r][0]).includes("Total Paid")) {
         const totalPaidRow = r + 1;
@@ -1973,7 +1995,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     const subCells = ["E", "F", "G", "I", "J", "K", "L", "M"];
     const subProxies: { c: string; r: Excel.Range }[] = [];
     for (const c of subCells) { const rng = ws.getRange(`${c}${stRow}`); rng.load("values"); subProxies.push({ c, r: rng }); }
-    const gColCopy = ws.getRange("G1:G60"); gColCopy.load("values");
+    const gColCopy = ws.getRange(`G1:G${tbbLast}`); gColCopy.load("values");
     await context.sync();
 
     for (const p of subProxies) {
@@ -2202,14 +2224,14 @@ async function poDoMove(context: Excel.RequestContext, wsVT: Excel.Worksheet, so
 }
 
 async function updateClientTotal(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
-  const vtA = await readValues(context, wsVT.getRange("A5:A80"));
+  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
   const s = scanVtSections(vtA);
   writeClientTotalFormulas(wsVT, s);
   await context.sync();
 }
 
 async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksheet, contract: string): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtA = await readValues(context, ws.getRange("A5:A300"));
   const vtE = await readValues(context, ws.getRange("E5:E80"));
   if (contract === "Without Estimate") {
     for (let r = 0; r < vtA.length; r++) { if (vtA[r][0] && String(vtA[r][0]).trim() === "Without Estimate") return r + 5; }
@@ -2220,7 +2242,7 @@ async function poFindContractRow(context: Excel.RequestContext, ws: Excel.Worksh
 }
 
 async function poFindInsertAfter(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtA = await readValues(context, ws.getRange("A5:A300"));
   const vtE = await readValues(context, ws.getRange("E5:E80"));
   let lastRow = contractRow;
   for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
@@ -2234,7 +2256,7 @@ async function poFindInsertAfter(context: Excel.RequestContext, ws: Excel.Worksh
 }
 
 async function poFindVendorRow(context: Excel.RequestContext, ws: Excel.Worksheet, contractRow: number, vendorName: string): Promise<number> {
-  const vtA = await readValues(context, ws.getRange("A5:A80"));
+  const vtA = await readValues(context, ws.getRange("A5:A300"));
   for (let r = contractRow - 5 + 1; r < vtA.length; r++) {
     const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
     if (a === "" && r > contractRow - 5 + 2) break;
@@ -2252,7 +2274,7 @@ async function runLoadMove(context: Excel.RequestContext, source: string): Promi
   await context.sync();
   if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
 
-  const vtA = await readValues(context, wsVT.getRange("A5:A80"));
+  const vtA = await readValues(context, wsVT.getRange("A5:A300"));
   const vtE = await readValues(context, wsVT.getRange("E5:E80"));
   const fg = await readValues(context, wsVT.getRange("F5:G80")); // F=amount, G=adj
 
