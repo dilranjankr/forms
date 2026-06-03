@@ -1826,12 +1826,17 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     let newTotalPaid = -1;
     for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { newTotalPaid = r + 1; break; } }
     if (newTotalPaid !== -1) {
-      const totalInsert = payments.length + 1;
+      // Insert exactly payments.length rows (no extra blank row) so payments
+      // sit flush right under 'Invoiced to Date' with no gap above the first
+      // payment line. Previous logic inserted payments.length + 1 rows and
+      // skipped the first one as a visual separator, which the user does not
+      // want.
+      const totalInsert = payments.length;
       const insertAt = newTotalPaid;
       wsTBB.getRange(`${insertAt}:${insertAt + totalInsert - 1}`).insert(Excel.InsertShiftDirection.down);
       wsTBB.getRange(`A${insertAt}:M${insertAt + totalInsert - 1}`).clear(Excel.ClearApplyTo.formats);
       for (let i = 0; i < payments.length; i++) {
-        const r = insertAt + 1 + i;
+        const r = insertAt + i;
         wsTBB.getRange(`G${r}`).values = [[payments[i].date]];
         wsTBB.getRange(`G${r}`).numberFormat = [["mm/dd/yyyy"]];
         wsTBB.getRange(`H${r}`).values = [[payments[i].ptype]];
