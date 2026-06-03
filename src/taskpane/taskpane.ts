@@ -1216,13 +1216,22 @@ function setLCPRow(ws: Excel.Worksheet, hdr2: (string | number | boolean)[], row
 // ───────────────────────── Run Update pr (Vendor Tracking) ─────────────────────────
 
 async function runUpdatePR(context: Excel.RequestContext) {
+  // Step label is mutated as we progress; if a downstream Office.js call
+  // (or stray array access) throws an opaque "property '0' of undefined"
+  // style error, the outer catch will rewrite the message to include the
+  // last step we reached, so the user can tell us where it failed.
+  let step = "init";
+  try {
+  step = "load sheets";
   const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
   const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
   wsVT.load("name"); wsInv.load("name");
   await context.sync();
   if (wsVT.isNullObject || wsInv.isNullObject) throw new Error("Sheet not found.");
 
+  step = "read invH2";
   const invH2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  step = "read invH3";
   const invH3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0];
   let tdIdx = -1, paidIdx = -1;
   for (let c = 0; c < invH2.length; c++) {
@@ -1232,6 +1241,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
   if (tdIdx === -1) throw new Error("Total To date not found.");
 
+  step = "scan invoice col A";
   const invLast = await getSafeLastRow(context, wsInv, 100);
   const invA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1, lcpHdrRow = -1;
@@ -1242,6 +1252,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
+  step = "build invPRs";
   const prEnd = paidIdx !== -1 ? paidIdx : 200;
   const invPRs: { name: string; col: number; isLCP: boolean }[] = [];
   if (prEnd > tdIdx + 1) {
@@ -1252,7 +1263,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
       let hasLDP = false, hasLCP = false;
       const colOff = c - (tdIdx + 1);
       for (let r = 0; r < prBlock.length; r++) {
-        const v = prBlock[r][colOff];
+        const row = prBlock[r];
+        if (!row) continue;
+        const v = row[colOff];
         if (v !== null && v !== "" && v !== 0) {
           if (lcpHdrRow !== -1 && (r + 5) >= lcpHdrRow) hasLCP = true;
           else hasLDP = true;
@@ -1265,6 +1278,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
     }
   }
 
+  step = "read VT header";
   const vtH = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
   let vtNotes = -1;
   for (let c = 0; c < vtH.length; c++) { if (vtH[c] && String(vtH[c]).trim() === "Notes") vtNotes = c; }
@@ -1278,15 +1292,19 @@ async function runUpdatePR(context: Excel.RequestContext) {
   // .reverse() = create right-to-left.
   const missing = invPRs.filter((p) => p.isLCP && !vtExist.has(p.name)).reverse();
 
+  step = "scan VT col A";
   const vtLast = await getSafeLastRow(context, wsVT, 80);
   const vtA = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
   let clientRow = -1, subContRow = -1;
   for (let r = 0; r < vtA.length; r++) {
-    const a = vtA[r][0] ? String(vtA[r][0]).trim() : "";
+    const row = vtA[r];
+    if (!row) continue;
+    const a = row[0] ? String(row[0]).trim() : "";
     if (a.includes("Client total") || a.includes("Client Total")) clientRow = r + 5;
     if (a.includes("Sub-Contractor Total")) subContRow = r + 5;
   }
 
+  step = "scan Project Indicators row";
   // Pre-scan the "Project Indicators are Below" row once (it never shifts
   // because all PR inserts happen ABOVE that row band). Header position
   // (LDP Total / PR#TBB / LCP Total) is re-read each iteration so it
@@ -1295,8 +1313,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
   {
     const scanVT = await readValues(context, wsVT.getRange("A1:Z60"));
     for (let r = 0; r < scanVT.length && indicRow === -1; r++) {
-      for (let cc = 0; cc < scanVT[r].length; cc++) {
-        const v = scanVT[r][cc] ? String(scanVT[r][cc]).trim().toLowerCase() : "";
+      const row = scanVT[r];
+      if (!row) continue;
+      for (let cc = 0; cc < row.length; cc++) {
+        const v = row[cc] ? String(row[cc]).trim().toLowerCase() : "";
         if (v.indexOf("project indicators") !== -1) { indicRow = r + 1; break; }
       }
     }
@@ -1305,6 +1325,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   const indicLastRow = indicRow + 25;
 
   for (const pr of missing) {
+    step = `insert VT col for ${pr.name}`;
     const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
     let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
     for (let c = 0; c < cur.length; c++) {
@@ -1427,15 +1448,25 @@ async function runUpdatePR(context: Excel.RequestContext) {
   for (let c = 0; c < fin.length; c++) { if (fin[c] && String(fin[c]).trim() === "PO Total") nPO = c; }
   if (nPO !== -1) {
     const po = CL(nPO);
+    step = "read PO classification ranges";
     const vtAr = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
-    const vtB = await readValues(context, wsVT.getRange("B5:B60"));
+    // BUG FIX: vtB was hardcoded to B5:B60 while vtAr scans dynamically up to
+    // vtLast (often 80+). When the loop below iterated past row 60, vtB[r]
+    // was undefined and vtB[r][0] threw "Unable to get property '0' of
+    // undefined or null reference". Read column B over the SAME row range
+    // as column A so the parallel index lookups always line up.
+    const vtB = await readValues(context, wsVT.getRange(`B5:B${vtLast}`));
     // Classify contracts by the bold "LDP"/"LCP" marker rows (NOT by contract name —
     // the LCP contract name may not contain "LCP")
     const ldpContracts: number[] = [], lcpContracts: number[] = [];
     let section = "LDP";
-    for (let r = 0; r < vtAr.length; r++) {
-      const a = vtAr[r][0] ? String(vtAr[r][0]).trim() : "";
-      const b = vtB[r][0];
+    const classLen = Math.min(vtAr.length, vtB.length);
+    for (let r = 0; r < classLen; r++) {
+      const arow = vtAr[r];
+      const brow = vtB[r];
+      if (!arow || !brow) continue;
+      const a = arow[0] ? String(arow[0]).trim() : "";
+      const b = brow[0];
       if (a === "LDP") { section = "LDP"; continue; }
       if (a === "LCP") { section = "LCP"; continue; }
       if (a.includes("Client total") || a.includes("Client Total") || a.includes("Analysis")) break;
@@ -1486,6 +1517,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
 
   wsVT.activate();
   await context.sync();
+  } catch (e: unknown) {
+    const msg = e && (e as Error).message ? (e as Error).message : String(e);
+    throw new Error(`VT update failed at step "${step}": ${msg}`);
+  }
 }
 
 // ───────────────────────── Get PR (load existing lines into the panel) ─────────────────────────
