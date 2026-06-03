@@ -836,13 +836,14 @@ async function addVendorTrackingRow(
 
   const vtLast = await getSafeLastRow(context, ws, 80);
   const vtAE = await readValues(context, ws.getRange(`A5:E${vtLast}`));
-  let lastDataRow = 6, clientTotalRow = -1, lcpAnalysisRow = -1, ldpMarkerRow = -1, lcpMarkerRow = -1;
+  let lastDataRow = 6, clientTotalRow = -1, lcpAnalysisRow = -1, ldpMarkerRow = -1, lcpMarkerRow = -1, withoutEstRow = -1;
 
   for (let r = 0; r < vtAE.length; r++) {
     const a = vtAE[r][0] ? String(vtAE[r][0]).trim() : "";
     const rowNum = r + 5;
     if (a === "LDP" && ldpMarkerRow === -1) ldpMarkerRow = rowNum;
     if (a === "LCP" && lcpMarkerRow === -1) lcpMarkerRow = rowNum;
+    if (a === "Without Estimate" && withoutEstRow === -1) withoutEstRow = rowNum;
     if (a.includes("LCP Analysis")) lcpAnalysisRow = rowNum;
     if (a.includes("Client total") || a.includes("Client Total")) { clientTotalRow = rowNum; break; }
     if (a !== "" && a !== "Contract" && !a.includes("Project Management") && !a.includes("Sub-Contractor")
@@ -866,8 +867,13 @@ async function addVendorTrackingRow(
       sectionEnd = lcpMarkerRow !== -1 ? lcpMarkerRow
         : (lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81));
     } else {
+      // LCP / Change Order — prefer "Without Estimate" as the section end so
+      // any new contract lands ABOVE the Without-Estimate block. That keeps
+      // Without Estimate (and its loose vendor rows) anchored at the bottom
+      // of the LCP section, right before LCP Analysis.
       sectionStart = lcpMarkerRow !== -1 ? lcpMarkerRow + 1 : 7;
-      sectionEnd = lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81);
+      sectionEnd = withoutEstRow !== -1 ? withoutEstRow
+        : (lcpAnalysisRow !== -1 ? lcpAnalysisRow : (clientTotalRow !== -1 ? clientTotalRow : 81));
     }
 
     // Scan for the LAST non-empty row in this section (not the first empty one).
