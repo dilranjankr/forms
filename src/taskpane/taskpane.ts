@@ -1408,8 +1408,21 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const h = fin[c] ? String(fin[c]).trim() : "";
     if (h === "" || h === "Notes") break;
     if (c === nLDPTot || c === nLCPTot || c === nTBB) continue;
-    if (nLDPTot !== -1 && c < nLDPTot) ldp.push(c);
-    else if (nLDPTot !== -1 && c > nLDPTot) lcp.push(c);
+    // BUG FIX: previous code only pushed columns when nLDPTot !== -1.
+    // In workbooks with NO LDP section (all PRs are LCP — Steele etc.),
+    // nLDPTot stayed -1 and every PR column fell through both branches,
+    // leaving the lcp[] array empty. The post-loop client-row /
+    // sub-contractor-row / colour writes then skipped every new PR,
+    // so PR#24's clientRow / subContRow / percentage cells stayed
+    // blank ("formula nhi aa raha h, drag nhi ho raha h").
+    if (nLDPTot === -1) {
+      // No LDP Total column → treat the entire PR band as LCP.
+      lcp.push(c);
+    } else if (c < nLDPTot) {
+      ldp.push(c);
+    } else if (c > nLDPTot) {
+      lcp.push(c);
+    }
   }
 
   const ldpFirst = ldp.length > 0 ? CL(ldp[0]) : "";
