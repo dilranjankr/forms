@@ -1296,12 +1296,19 @@ async function runUpdatePR(context: Excel.RequestContext) {
   const vtLast = await getSafeLastRow(context, wsVT, 80);
   const vtA = await readValues(context, wsVT.getRange(`A5:A${vtLast}`));
   let clientRow = -1, subContRow = -1;
+  // BUG FIX: workbooks with BOTH 'LCP Analysis' (~row 79) AND a later
+  // 'LDP Analysis' (~row 92) section have TWO 'Client total Contract/Cost'
+  // rows in column A. The original loop reassigned clientRow on every
+  // match, so the LDP one (row 93) won and the post-loop client-row write
+  // landed at row 93 instead of row 80 — PR#24 row 80 stayed blank.
+  // Same story for 'Sub-Contractor Total Paid' at rows 82 vs 95.
+  // Lock onto the FIRST match in each so the LCP analysis row wins.
   for (let r = 0; r < vtA.length; r++) {
     const row = vtA[r];
     if (!row) continue;
     const a = row[0] ? String(row[0]).trim() : "";
-    if (a.includes("Client total") || a.includes("Client Total")) clientRow = r + 5;
-    if (a.includes("Sub-Contractor Total")) subContRow = r + 5;
+    if (clientRow === -1 && (a.includes("Client total") || a.includes("Client Total"))) clientRow = r + 5;
+    if (subContRow === -1 && a.includes("Sub-Contractor Total")) subContRow = r + 5;
   }
 
   step = "scan Project Indicators row";
@@ -1368,8 +1375,17 @@ async function runUpdatePR(context: Excel.RequestContext) {
     // formula shape (SUMIF / direct reference to Invoice) that PR#TBB
     // uses, just retargeted to the new PR column.
     const tbbColIdx = insertAt + 1; // PR#TBB shifted right by 1 after the insert above
-    wsVT.getRange(`${col}7:${col}${indicLastRow}`).copyFrom(
-      wsVT.getRange(`${CL(tbbColIdx)}7:${CL(tbbColIdx)}${indicLastRow}`),
+    // Extend the formula-mirror down through the LAST used row of VT, not
+    // just the (often missed) 'Project Indicators are Below' band. In the
+    // Steele workbook 'Project Indicators' text doesn't exist anywhere in
+    // A1:Z60 so indicRow defaults to 23 and indicLastRow = 48 — that
+    // misses the LCP Analysis rows at 79-84 (Client total, Sub-Contractor
+    // Total, Percentage, Gross Margin), leaving PR#24 row 80 / 82 / 83
+    // blank because nothing copies them and the post-loop writes only
+    // touch clientRow + subContRow specifically.
+    const copyEndRow = Math.max(indicLastRow, vtLast);
+    wsVT.getRange(`${col}7:${col}${copyEndRow}`).copyFrom(
+      wsVT.getRange(`${CL(tbbColIdx)}7:${CL(tbbColIdx)}${copyEndRow}`),
       Excel.RangeCopyType.formulas
     );
     await context.sync();
