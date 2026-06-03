@@ -541,8 +541,8 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
 
   const invLast = await getSafeLastRow(context, wsInv, 100);
 
-  let hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
-  let hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0];
+  let hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  let hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0];
 
   let tdIdx = -1;
   for (let c = 0; c < hdr2.length; c++) {
@@ -626,7 +626,7 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     }
   }
 
-  hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
+  hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
   tdIdx = -1;
   let paidIdx = -1, compIdx = -1, pctIdx = -1, balIdx = -1, firstPRIdx = -1, lastPRIdx = -1;
   for (let c = 0; c < hdr2.length; c++) {
@@ -1020,7 +1020,7 @@ async function updateVTFormulas(context: Excel.RequestContext, ws: Excel.Workshe
 }
 
 async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, wsVT: Excel.Worksheet) {
-  const headers = (await readValues(context, wsVT.getRange("A5:AD5")))[0];
+  const headers = (await readValues(context, wsVT.getRange("A5:GR5")))[0]; // A..GR = 200 columns
   let poTotalIdx = -1, ldpTotalIdx = -1, lcpTotalIdx = -1;
   for (let c = 0; c < headers.length; c++) {
     const h = headers[c] ? String(headers[c]).trim() : "";
@@ -1158,7 +1158,7 @@ async function updateAllFormulas(
   let ldpEnd = dEnd;
   if (lcpHdrRow !== -1) ldpEnd = lcpHdrRow - 1;
 
-  const hdr2 = (await readValues(context, ws.getRange("A2").getResizedRange(0, 51)))[0];
+  const hdr2 = (await readValues(context, ws.getRange("A2").getResizedRange(0, 200)))[0];
   setTotalsRow(ws, hdr2, grandRow, 5, dEnd, tdIdx, compIdx, balIdx);
   if (ldpSubRow !== -1) setTotalsRow(ws, hdr2, ldpSubRow, 5, ldpEnd, tdIdx, compIdx, balIdx);
   if (lcpSubRow !== -1 && ldpSubRow !== -1) setLCPRow(ws, hdr2, lcpSubRow, grandRow, ldpSubRow, tdIdx, compIdx, balIdx);
@@ -1216,8 +1216,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
   await context.sync();
   if (wsVT.isNullObject || wsInv.isNullObject) throw new Error("Sheet not found.");
 
-  const invH2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 30)))[0];
-  const invH3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 30)))[0];
+  const invH2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  const invH3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0];
   let tdIdx = -1, paidIdx = -1;
   for (let c = 0; c < invH2.length; c++) {
     const h = invH2[c] ? String(invH2[c]).trim() : "";
@@ -1236,7 +1236,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
-  const prEnd = paidIdx !== -1 ? paidIdx : 30;
+  const prEnd = paidIdx !== -1 ? paidIdx : 200;
   const invPRs: { name: string; col: number; isLCP: boolean }[] = [];
   if (prEnd > tdIdx + 1) {
     const prBlock = await readValues(context, wsInv.getRange(`${CL(tdIdx + 1)}5:${CL(prEnd - 1)}${grandRow - 1}`));
@@ -1259,10 +1259,10 @@ async function runUpdatePR(context: Excel.RequestContext) {
     }
   }
 
-  const vtH = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+  const vtH = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
   let vtNotes = -1;
   for (let c = 0; c < vtH.length; c++) { if (vtH[c] && String(vtH[c]).trim() === "Notes") vtNotes = c; }
-  const validEnd = vtNotes !== -1 ? vtNotes : 30;
+  const validEnd = vtNotes !== -1 ? vtNotes : 200;
   const vtExist = new Set<string>();
   for (let c = 8; c < validEnd; c++) {
     const h = vtH[c] ? String(vtH[c]).trim() : "";
@@ -1282,7 +1282,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
   }
 
   for (const pr of missing) {
-    const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+    const cur = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
     let curLDPTot = -1, curTBB = -1, curLCPTot = -1;
     for (let c = 0; c < cur.length; c++) {
       const h = cur[c] ? String(cur[c]).trim() : "";
@@ -1332,7 +1332,7 @@ async function runUpdatePR(context: Excel.RequestContext) {
     await context.sync();
   }
 
-  const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 30)))[0];
+  const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
 
   for (const pr of invPRs) {
     if (!pr.isLCP) continue; // LDP PRs are not mirrored into Vendor Tracking
@@ -1484,8 +1484,8 @@ async function runGetPR(context: Excel.RequestContext): Promise<{ desc: string; 
   await context.sync();
   if (wsInv.isNullObject) throw new Error("Invoice Worksheet not found.");
 
-  const hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 51)))[0];
-  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0];
+  const hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0];
   let tdIdx = -1, prTBBIdx = -1;
   for (let c = 0; c < hdr2.length; c++) {
     if (hdr2[c] && String(hdr2[c]).trim() === "Total To date" && tdIdx === -1) tdIdx = c;
@@ -1530,7 +1530,7 @@ async function runGetLatestPRName(context: Excel.RequestContext): Promise<string
   await context.sync();
   if (wsInv.isNullObject) return "";
 
-  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 51)))[0] as (string | number)[];
+  const hdr3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0] as (string | number)[];
   let tbbCol = -1;
   for (let c = 0; c < hdr3.length; c++) {
     if (hdr3[c] && String(hdr3[c]).trim().toUpperCase() === "PR#TBB") { tbbCol = c; break; }
@@ -1564,8 +1564,8 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   const hasPay = !wsPay.isNullObject;
 
   // Find columns
-  const h2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 30)))[0];
-  const h3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 30)))[0];
+  const h2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  const h3 = (await readValues(context, wsInv.getRange("A3").getResizedRange(0, 200)))[0];
   let tdIdx = -1, paidIdx = -1, fPRIdx = -1, lPRIdx = -1, tbbIdx = -1;
   for (let c = 0; c < h2.length; c++) {
     const hh = h2[c] ? String(h2[c]).trim() : "";
@@ -1577,7 +1577,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   }
   if (tdIdx === -1 || fPRIdx === -1) throw new Error("Columns not found.");
 
-  const prEnd = paidIdx !== -1 ? paidIdx : 30;
+  const prEnd = paidIdx !== -1 ? paidIdx : 200;
   const allPRs: { name: string; col: number }[] = [];
   for (let c = tdIdx + 1; c < prEnd; c++) {
     const nm = h3[c] ? String(h3[c]).trim() : "";
