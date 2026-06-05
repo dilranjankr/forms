@@ -1526,7 +1526,11 @@ async function runUpdatePR(context: Excel.RequestContext) {
     if (h === "LCP Total") nLCPTot = c;
     if (h.toUpperCase().includes("TBB")) nTBB = c;
   }
-  // LCP total column may simply be labelled "Total" (under the "LCP Project" header)
+  // Track whether nLCPTot was matched by the EXACT 'LCP Total' header
+  // (addin-managed) or by the fallback plain 'Total' column. User-owned
+  // 'Total' columns (Steele etc.) must keep their original formulas — we
+  // only need its position for PR / TBB classification, never to overwrite.
+  let nLCPTotIsLCPTotal = nLCPTot !== -1;
   if (nLCPTot === -1) {
     for (let c = nLDPTot + 1; c < fin.length; c++) {
       const h = fin[c] ? String(fin[c]).trim() : "";
@@ -1563,7 +1567,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
     wsVT.getRange(`${CL(nLDPTot)}6`).formulas = [[`=SUM(${ldpFirst}6:${ldpLast}6)`]];
     wsVT.getRange(`${CL(nLDPTot)}6`).numberFormat = [[FMT_ACCT]];
   }
-  if (nLCPTot !== -1 && lcpFirst !== "" && lcpLast !== "") {
+  // Skip writing the row-6 SUM into the nLCPTot column when it's just a
+  // plain user-owned 'Total' column — leave its existing formula alone.
+  if (nLCPTot !== -1 && nLCPTotIsLCPTotal && lcpFirst !== "" && lcpLast !== "") {
     wsVT.getRange(`${CL(nLCPTot)}6`).formulas = [[`=SUM(${lcpFirst}6:${lcpLast}6)`]];
     wsVT.getRange(`${CL(nLCPTot)}6`).numberFormat = [[FMT_ACCT]];
   }
@@ -1576,7 +1582,8 @@ async function runUpdatePR(context: Excel.RequestContext) {
       wsVT.getRange(`${CL(nLDPTot)}${clientRow}`).formulas = [[`=SUM(${ldpFirst}${clientRow}:${ldpLast}${clientRow})`]];
       wsVT.getRange(`${CL(nLDPTot)}${clientRow}`).numberFormat = [[FMT_ACCT]];
     }
-    if (nLCPTot !== -1 && lcpFirst !== "" && lcpLast !== "") {
+    // Skip clientRow write into plain 'Total' column — preserve user formula.
+    if (nLCPTot !== -1 && nLCPTotIsLCPTotal && lcpFirst !== "" && lcpLast !== "") {
       wsVT.getRange(`${CL(nLCPTot)}${clientRow}`).formulas = [[`=SUM(${lcpFirst}${clientRow}:${lcpLast}${clientRow})`]];
       wsVT.getRange(`${CL(nLCPTot)}${clientRow}`).numberFormat = [[FMT_ACCT]];
     }
@@ -1587,7 +1594,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
     const all = [...ldp, ...lcp];
     if (nLDPTot !== -1) all.push(nLDPTot);
     if (nTBB !== -1) all.push(nTBB);
-    if (nLCPTot !== -1) all.push(nLCPTot);
+    // Only include nLCPTot in the subContRow SUM write when it's truly the
+    // 'LCP Total' column. Plain 'Total' stays user-owned.
+    if (nLCPTot !== -1 && nLCPTotIsLCPTotal) all.push(nLCPTot);
     for (const c of all) {
       wsVT.getRange(`${CL(c)}${subContRow}`).formulas = [[`=SUM(${CL(c)}7:${CL(c)}${end})`]];
       wsVT.getRange(`${CL(c)}${subContRow}`).numberFormat = [[FMT_ACCT]];
@@ -1665,7 +1674,9 @@ async function runUpdatePR(context: Excel.RequestContext) {
   if (nLDPTot !== -1) { wsVT.getRange(`${CL(nLDPTot)}5`).format.fill.color = ldpClr; wsVT.getRange(`${CL(nLDPTot)}5`).format.font.bold = true; }
   for (const c of lcp) { wsVT.getRange(`${CL(c)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(c)}5`).format.font.bold = true; }
   if (nTBB !== -1) { wsVT.getRange(`${CL(nTBB)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(nTBB)}5`).format.font.bold = true; }
-  if (nLCPTot !== -1) { wsVT.getRange(`${CL(nLCPTot)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(nLCPTot)}5`).format.font.bold = true; }
+  // Only colour-fill row 5 of nLCPTot when it's the real 'LCP Total' header,
+  // not a user-owned plain 'Total' column whose header style must stay as-is.
+  if (nLCPTot !== -1 && nLCPTotIsLCPTotal) { wsVT.getRange(`${CL(nLCPTot)}5`).format.fill.color = lcpClr; wsVT.getRange(`${CL(nLCPTot)}5`).format.font.bold = true; }
 
   wsVT.activate();
   await context.sync();
