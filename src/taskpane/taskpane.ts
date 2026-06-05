@@ -649,11 +649,18 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   let colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
   let grandRow = -1, ldpSubRow = -1, lcpSubRow = -1, lcpHdrRow = -1;
   for (let r = 4; r < colA.length; r++) {
-    const a = colA[r][0] ? String(colA[r][0]).trim() : "";
-    if (a === "Grand - TOTALS") grandRow = r + 1;
-    if (a === "SUB - TOTALS - LDP") ldpSubRow = r + 1;
-    if (a === "SUB - TOTALS - LCP") lcpSubRow = r + 1;
-    if (a === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
+    const aRaw = colA[r][0];
+    // .replace( ,' ') handles non-breaking space (some workbooks paste
+    // "LCP" with NBSP that .trim() can't strip), then case-fold so 'LCP',
+    // 'lcp', 'Lcp ', etc. all match. Bug repro: user's LCP CO #11 sheet
+    // had lcpHdrRow stuck at -1, so SUB-TOTAL-LDP formula = SUM(M5:M96)
+    // included the LCP row and double-counted into LDP.
+    const a = aRaw ? String(aRaw).replace(/ /g, ' ').trim() : "";
+    const aU = a.toUpperCase();
+    if (aU === "GRAND - TOTALS") grandRow = r + 1;
+    if (aU === "SUB - TOTALS - LDP") ldpSubRow = r + 1;
+    if (aU === "SUB - TOTALS - LCP") lcpSubRow = r + 1;
+    if (aU === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
   }
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
@@ -1161,13 +1168,36 @@ async function updateAllFormulas(
   }
 
   const dEnd = grandRow - 1;
-  let ldpEnd = dEnd;
-  if (lcpHdrRow !== -1) ldpEnd = lcpHdrRow - 1;
+  const hasLCP = lcpHdrRow !== -1 && lcpHdrRow > 5 && lcpHdrRow < grandRow;
+  // Split LDP and LCP ranges by the 'LCP' header row. When the header is
+  // absent we treat everything as LDP (LCP subtotal stays at zero).
+  const ldpEnd = hasLCP ? lcpHdrRow - 1 : dEnd;
+  const lcpStart = hasLCP ? lcpHdrRow + 1 : -1;
 
   const hdr2 = (await readValues(context, ws.getRange("A2").getResizedRange(0, 200)))[0];
   setTotalsRow(ws, hdr2, grandRow, 5, dEnd, tdIdx, compIdx, balIdx);
+
+  // LDP SUB-TOTAL = SUM rows 5..ldpEnd (LCP rows excluded). Independent of LCP.
   if (ldpSubRow !== -1) setTotalsRow(ws, hdr2, ldpSubRow, 5, ldpEnd, tdIdx, compIdx, balIdx);
-  if (lcpSubRow !== -1 && ldpSubRow !== -1) setLCPRow(ws, hdr2, lcpSubRow, grandRow, ldpSubRow, tdIdx, compIdx, balIdx);
+
+  // LCP SUB-TOTAL is now computed DIRECTLY as SUM(lcpHdrRow+1..grandRow-1)
+  // instead of Grand−LDP. The old "Grand−LDP" formula propagated any LDP
+  // mistake into LCP (and vice-versa) — when lcpHdrRow detection failed
+  // the LCP value collapsed to zero or doubled the LCP line into LDP.
+  // Direct SUM makes each subtotal self-contained.
+  if (lcpSubRow !== -1) {
+    if (hasLCP) {
+      setTotalsRow(ws, hdr2, lcpSubRow, lcpStart, dEnd, tdIdx, compIdx, balIdx);
+    } else {
+      // No LCP section in this workbook — write 0 to numeric columns of
+      // the LCP SUB-TOTAL row so it doesn't pick up stale formulas.
+      const end = balIdx !== -1 ? balIdx : tdIdx;
+      for (let c = 1; c <= end; c++) {
+        ws.getRange(`${CL(c)}${lcpSubRow}`).values = [[0]];
+        ws.getRange(`${CL(c)}${lcpSubRow}`).numberFormat = [[FMT_USD]];
+      }
+    }
+  }
   await context.sync();
 }
 
