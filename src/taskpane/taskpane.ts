@@ -1880,11 +1880,34 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // the new rows look identical to the surrounding template rows.
     const templateRow = insStart - 1;
     if (templateRow >= tbbStart) {
+      // List of every border slot that "All Borders" actually paints
+      // (edges + inside horizontal/vertical + diagonals). Office.js exposes
+      // these as enum entries on Excel.BorderIndex.
+      const borderSlots: Excel.BorderIndex[] = [
+        Excel.BorderIndex.edgeTop,
+        Excel.BorderIndex.edgeBottom,
+        Excel.BorderIndex.edgeLeft,
+        Excel.BorderIndex.edgeRight,
+        Excel.BorderIndex.insideHorizontal,
+        Excel.BorderIndex.insideVertical,
+        Excel.BorderIndex.diagonalDown,
+        Excel.BorderIndex.diagonalUp,
+      ];
       for (let r = insStart; r <= insEnd; r++) {
         wsTBB.getRange(`A${r}:M${r}`).copyFrom(
           wsTBB.getRange(`A${templateRow}:M${templateRow}`),
           Excel.RangeCopyType.formats
         );
+        // User wants PR#TBB rows to look like Invoice Worksheet rows —
+        // no cell borders on data rows. copyFrom above carries fonts /
+        // alignment / fills / number-format from the template row, but
+        // borders on the template would otherwise inherit into every new
+        // row. Wipe them so the new rows are border-free regardless of
+        // what the template happened to have.
+        const newR = wsTBB.getRange(`A${r}:M${r}`);
+        for (const slot of borderSlots) {
+          newR.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
+        }
       }
       await context.sync();
     }
@@ -1956,6 +1979,30 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   wsTBB.getRange(`L${tbbStart}:L${lastD}`).numberFormat = [["0%"]];
   wsTBB.getRange(`M${tbbStart}:M${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
   wsTBB.getRange(`J${tbbStart}:J${lastD}`).format.fill.color = "#FFFF00";
+
+  // Strip cell borders from the entire PR#TBB data band so the rows look
+  // like the Invoice Worksheet rows (no inner grid). The earlier template
+  // copy could carry borders inherited from any one previously-bordered
+  // row, which made the data band sometimes show black grid lines and
+  // sometimes not depending on which row happened to be the template.
+  // Wiping all eight border slots across the whole band guarantees a
+  // consistent borderless look regardless of template history.
+  if (lastD >= tbbStart) {
+    const dataBand = wsTBB.getRange(`A${tbbStart}:M${lastD}`);
+    const borderSlots: Excel.BorderIndex[] = [
+      Excel.BorderIndex.edgeTop,
+      Excel.BorderIndex.edgeBottom,
+      Excel.BorderIndex.edgeLeft,
+      Excel.BorderIndex.edgeRight,
+      Excel.BorderIndex.insideHorizontal,
+      Excel.BorderIndex.insideVertical,
+      Excel.BorderIndex.diagonalDown,
+      Excel.BorderIndex.diagonalUp,
+    ];
+    for (const slot of borderSlots) {
+      dataBand.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
+    }
+  }
 
   // SUB-TOTALS
   wsTBB.getRange(`A${stRow}:D${stRow}`).merge(false);
