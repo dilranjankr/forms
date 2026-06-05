@@ -63,6 +63,7 @@ Office.onReady((info) => {
     (document.getElementById("addRow") as HTMLElement).onclick = () => addItemRow();
     (document.getElementById("generate") as HTMLElement).onclick = generate;
     (document.getElementById("invoiceGen") as HTMLElement).onclick = invoiceGen;
+    (document.getElementById("repairAll") as HTMLElement).onclick = repairAll;
 
     // Help overlay — opens fullscreen Help & Reference panel
     (document.getElementById("helpBtn") as HTMLElement).onclick = () => {
@@ -313,6 +314,21 @@ async function invoiceGen() {
     let summary = "Invoice generated.";
     await Excel.run(async (context) => { summary = await runInvoiceGenerate(context); });
     setStatus(summary, "ok");
+  } catch (e) {
+    console.error(e);
+    setStatus("ERROR: " + errMsg(e), "err");
+  } finally { setBusy(false); }
+}
+
+// Re-write Invoice Worksheet + Vendor Tracking formulas WITHOUT inserting
+// any new rows or columns. Used to retroactively repair older workbooks
+// that were saved with earlier addin versions whose lcpHdrRow / clientRow
+// / sub-totals logic had bugs (now fixed in v5).
+async function repairAll() {
+  setStatus("Repairing formulas (Invoice + VT)…", "busy"); setBusy(true);
+  try {
+    await Excel.run(async (context) => { await runRepairFormulas(context); });
+    setStatus("Formulas refreshed. SUB-TOTAL LDP / LCP and Vendor Tracking rows updated.", "ok");
   } catch (e) {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
@@ -1121,6 +1137,73 @@ async function loadPOContracts(context: Excel.RequestContext) {
 }
 
 // ───────────────────────── Invoice Worksheet formulas ─────────────────────────
+
+// "Repair" entry-point — re-scans the Invoice Worksheet (and Vendor Tracking
+// if present) and re-writes every derived formula using the current v5+
+// logic, without inserting any new rows or columns. Use this to retroactively
+// fix workbooks that were created with earlier addin versions whose
+// lcpHdrRow / SUB-TOTAL / VT-classification code had bugs.
+async function runRepairFormulas(context: Excel.RequestContext): Promise<void> {
+  const wsInv = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Invoice Worksheet");
+  wsInv.load("name");
+  await context.sync();
+  if (wsInv.isNullObject) throw new Error("Invoice Worksheet not found.");
+
+  // Header row scan (row 2) — same shape as runInputForm uses.
+  const hdr2 = (await readValues(context, wsInv.getRange("A2").getResizedRange(0, 200)))[0];
+  let tdIdx = -1, paidIdx = -1, compIdx = -1, pctIdx = -1, balIdx = -1, firstPRIdx = -1, lastPRIdx = -1;
+  for (let c = 0; c < hdr2.length; c++) {
+    const h = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (h === "Total To date" && tdIdx === -1) tdIdx = c;
+    if (h === "Paid to Date" && paidIdx === -1) paidIdx = c;
+    if (h === "Completed to Date" && compIdx === -1) compIdx = c;
+    if (h.includes("% Completed") && pctIdx === -1) pctIdx = c;
+    if (h === "Balance to Finish" && balIdx === -1) balIdx = c;
+  }
+  if (tdIdx === -1) throw new Error("'Total To date' column not found in row 2.");
+  for (let c = tdIdx + 1; c < (paidIdx !== -1 ? paidIdx : hdr2.length); c++) {
+    const h = hdr2[c] ? String(hdr2[c]).trim() : "";
+    if (h === "Payment Request" || h === "Deposit - LDP/LCP") {
+      if (firstPRIdx === -1) firstPRIdx = c;
+      lastPRIdx = c;
+    }
+  }
+
+  // Section markers in column A (NBSP-tolerant + case-fold, same as runInputForm).
+  const invLast = await getSafeLastRow(context, wsInv, 100);
+  const colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
+  let grandRow = -1, ldpSubRow = -1, lcpSubRow = -1, lcpHdrRow = -1;
+  for (let r = 4; r < colA.length; r++) {
+    const aRaw = colA[r][0];
+    const a = aRaw ? String(aRaw).replace(/ /g, ' ').trim() : "";
+    const aU = a.toUpperCase();
+    if (aU === "GRAND - TOTALS") grandRow = r + 1;
+    if (aU === "SUB - TOTALS - LDP") ldpSubRow = r + 1;
+    if (aU === "SUB - TOTALS - LCP") lcpSubRow = r + 1;
+    if (aU === "LCP" && lcpHdrRow === -1) lcpHdrRow = r + 1;
+  }
+  if (grandRow === -1) throw new Error("'Grand - TOTALS' row not found in column A.");
+
+  // Re-write Invoice Worksheet derived formulas (Total To date / Paid /
+  // Completed / % / Balance / SUB-TOTAL-LDP / SUB-TOTAL-LCP / Grand-TOTALS).
+  await updateAllFormulas(context, wsInv, grandRow, tdIdx, firstPRIdx, lastPRIdx, paidIdx, compIdx, pctIdx, balIdx, lcpHdrRow, ldpSubRow, lcpSubRow);
+
+  // Vendor Tracking refresh — same path the regular Save flow takes after
+  // an LDP/LCP/CO insert. runUpdatePR re-classifies PR columns + writes
+  // clientRow / subContRow / Percentage / colour formulas for every PR
+  // and re-runs the Project Indicators copyFrom from PR#TBB.
+  const wsVT = context.workbook.worksheets.getItemOrNullObject("LDP & LCP - Vendor Tracking");
+  wsVT.load("name");
+  await context.sync();
+  if (!wsVT.isNullObject) {
+    await updateVTFormulas(context, wsVT);
+    await repairAllVendorTrackingFormulas(context, wsVT);
+    await runUpdatePR(context);
+  }
+
+  wsInv.activate();
+  await context.sync();
+}
 
 async function updateAllFormulas(
   context: Excel.RequestContext, ws: Excel.Worksheet, grandRow: number,
