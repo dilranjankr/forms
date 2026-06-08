@@ -1891,16 +1891,17 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     // the new rows look identical to the surrounding template rows.
     const templateRow = insStart - 1;
     if (templateRow >= tbbStart) {
-      // List of every border slot that "All Borders" actually paints
-      // (edges + inside horizontal/vertical + diagonals). Office.js exposes
-      // these as enum entries on Excel.BorderIndex.
-      const borderSlots: Excel.BorderIndex[] = [
+      // Only wipe HORIZONTAL borders (top/bottom edges + inside-horizontal
+      // grid lines that create row dividers). Keep edgeLeft / edgeRight /
+      // insideVertical intact so the column dividers (yellow CO#TBB column
+      // outline, vertical lines between numeric columns, etc.) inherited
+      // from the template row stay visible on the new rows. Diagonals are
+      // wiped because they're almost never intentional and can come
+      // through inheritance from old template state.
+      const rowBorderSlots: Excel.BorderIndex[] = [
         Excel.BorderIndex.edgeTop,
         Excel.BorderIndex.edgeBottom,
-        Excel.BorderIndex.edgeLeft,
-        Excel.BorderIndex.edgeRight,
         Excel.BorderIndex.insideHorizontal,
-        Excel.BorderIndex.insideVertical,
         Excel.BorderIndex.diagonalDown,
         Excel.BorderIndex.diagonalUp,
       ];
@@ -1909,14 +1910,8 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
           wsTBB.getRange(`A${templateRow}:M${templateRow}`),
           Excel.RangeCopyType.formats
         );
-        // User wants PR#TBB rows to look like Invoice Worksheet rows —
-        // no cell borders on data rows. copyFrom above carries fonts /
-        // alignment / fills / number-format from the template row, but
-        // borders on the template would otherwise inherit into every new
-        // row. Wipe them so the new rows are border-free regardless of
-        // what the template happened to have.
         const newR = wsTBB.getRange(`A${r}:M${r}`);
-        for (const slot of borderSlots) {
+        for (const slot of rowBorderSlots) {
           newR.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
         }
       }
@@ -1991,26 +1986,22 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   wsTBB.getRange(`M${tbbStart}:M${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
   wsTBB.getRange(`J${tbbStart}:J${lastD}`).format.fill.color = "#FFFF00";
 
-  // Strip cell borders from the entire PR#TBB data band so the rows look
-  // like the Invoice Worksheet rows (no inner grid). The earlier template
-  // copy could carry borders inherited from any one previously-bordered
-  // row, which made the data band sometimes show black grid lines and
-  // sometimes not depending on which row happened to be the template.
-  // Wiping all eight border slots across the whole band guarantees a
-  // consistent borderless look regardless of template history.
+  // Strip ONLY the horizontal cell borders from the data band so the rows
+  // look like the Invoice Worksheet rows (no row dividers). Column-wise
+  // vertical dividers are part of the PR#TBB template design (yellow CO#TBB
+  // column outline, vertical lines between numeric columns) and MUST stay
+  // intact — the user explicitly asked that "column wala formatting"
+  // (column borders) be preserved on every regenerate.
   if (lastD >= tbbStart) {
     const dataBand = wsTBB.getRange(`A${tbbStart}:M${lastD}`);
-    const borderSlots: Excel.BorderIndex[] = [
+    const rowBorderSlots: Excel.BorderIndex[] = [
       Excel.BorderIndex.edgeTop,
       Excel.BorderIndex.edgeBottom,
-      Excel.BorderIndex.edgeLeft,
-      Excel.BorderIndex.edgeRight,
       Excel.BorderIndex.insideHorizontal,
-      Excel.BorderIndex.insideVertical,
       Excel.BorderIndex.diagonalDown,
       Excel.BorderIndex.diagonalUp,
     ];
-    for (const slot of borderSlots) {
+    for (const slot of rowBorderSlots) {
       dataBand.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
     }
   }
