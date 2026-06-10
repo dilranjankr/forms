@@ -744,7 +744,11 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         }
         wsInv.getRange(`A${insertRow}`).values = [[item.desc]];
         wsInv.getRange(`A${insertRow}`).format.font.bold = false;
-        wsInv.getRange(`A${insertRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+        // Template-row copyFrom can carry a red / coloured font if that row
+        // happened to be a credit / negative-amount row. Force column A back
+        // to black so description text always reads clearly regardless of
+        // what the template's font colour was.
+        wsInv.getRange(`A${insertRow}`).format.font.color = "#000000";
         wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
         wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
         grandRow++;
@@ -827,8 +831,11 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     if (b.text === "") continue;
     wsInv.getRange(`A${row}`).values = [[b.text]];
     wsInv.getRange(`A${row}`).format.font.bold = b.bold;
-    // User requested column A always centre-aligned for inserted descriptions.
-    wsInv.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    // Template-row copyFrom can carry a red / coloured font (credit rows,
+    // negative-amount rows etc.). Force column A back to black so header
+    // and item descriptions always render in the standard text colour
+    // regardless of which row got picked as the template.
+    wsInv.getRange(`A${row}`).format.font.color = "#000000";
     if (b.amt !== 0) {
       wsInv.getRange(`${tgtCol}${row}`).values = [[b.amt]];
       wsInv.getRange(`${tgtCol}${row}`).numberFormat = [[FMT_ACCT]];
