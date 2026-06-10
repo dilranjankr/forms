@@ -545,6 +545,41 @@ async function getSafeLastRow(context: Excel.RequestContext, ws: Excel.Worksheet
   }
 }
 
+// Pick a "good" template row in the Invoice Worksheet to copy column-wise
+// formatting (borders, fills, alignment, number formats) from when inserting
+// new data rows. We walk UP from the insertion point looking for the
+// closest plain data row — skipping blanks, section headers ("LCP" / "LDP"),
+// sub-totals and "Grand - TOTALS" — because those rows have header-style
+// borders that don't match a normal data row's column dividers. Falls back
+// to row 6 (the first content row in a fresh template) if nothing better is
+// found. Returns -1 if even row 6 is blank.
+function findInvTemplateRow(
+  colA: (string | number | boolean)[][],
+  insertAt: number
+): number {
+  const isHeaderLike = (s: string): boolean => {
+    const u = s.toUpperCase();
+    return (
+      u === "" ||
+      u === "LDP" ||
+      u === "LCP" ||
+      u.startsWith("SUB - TOTAL") ||
+      u.startsWith("SUB-TOTAL") ||
+      u === "GRAND - TOTALS" ||
+      u.startsWith("CHANGE ORDER #") ||
+      u.startsWith("LCP CO #") ||
+      u.startsWith("LDP CO #")
+    );
+  };
+  for (let r = insertAt - 2; r >= 4; r--) {
+    if (r >= colA.length) continue;
+    const v = colA[r] && colA[r][0] ? String(colA[r][0]).trim() : "";
+    if (!isHeaderLike(v)) return r + 1;
+  }
+  const v6 = colA[5] && colA[5][0] ? String(colA[5][0]).trim() : "";
+  return v6 !== "" ? 6 : -1;
+}
+
 // ───────────────────────── Main port (Run Input Form) ─────────────────────────
 
 async function runInputForm(context: Excel.RequestContext, form: InputFormData) {
@@ -695,8 +730,21 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
       if (!matched) {
         const insertRow = grandRow;
         wsInv.getRange(`${insertRow}:${insertRow}`).insert(Excel.InsertShiftDirection.down);
+        // Inherit the surrounding row's column borders / fills so the new row
+        // continues the column-wise formatting (vertical dividers etc.). The
+        // template is the nearest real data row above the insertion — we skip
+        // any blank / header / total rows so the borders we copy actually match
+        // a normal data row.
+        const tplRow = findInvTemplateRow(colA, insertRow);
+        if (tplRow !== -1) {
+          wsInv.getRange(`A${insertRow}:${CL(Math.max(tdIdx + 10, 30))}${insertRow}`).copyFrom(
+            wsInv.getRange(`A${tplRow}:${CL(Math.max(tdIdx + 10, 30))}${tplRow}`),
+            Excel.RangeCopyType.formats
+          );
+        }
         wsInv.getRange(`A${insertRow}`).values = [[item.desc]];
         wsInv.getRange(`A${insertRow}`).format.font.bold = false;
+        wsInv.getRange(`A${insertRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
         wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
         wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
         grandRow++;
@@ -738,6 +786,10 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   if (needLCPHdr) block.push({ text: "LCP", bold: true, amt: 0 });
   if (secHeader !== "") block.push({ text: secHeader, bold: true, amt: 0 });
   for (const item of items) block.push({ text: item.desc, bold: item.isHdr, amt: item.amt });
+  // Always end the new section with one blank row for visual spacing — the
+  // next section's first row will sit just below this blank. User asked
+  // specifically: "last me ek blank row hone chahiye".
+  block.push({ text: "", bold: false, amt: 0 });
 
   // Always insert fresh rows at insertAt so existing data is NEVER overwritten
   // (pushes the rest — including the LCP section / totals — down).
@@ -751,12 +803,32 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     await context.sync();
   }
 
+  // Find a regular data row above the insertion point whose format we can
+  // mirror onto every freshly-inserted row. Excel's default 'insert' uses
+  // "Format Same As Above", but the row directly above is sometimes a
+  // blank separator / SUB-TOTAL / 'LCP' header / 'Grand - TOTALS', whose
+  // borders don't match the actual column-divider pattern of normal data
+  // rows. Copying from a known good template row guarantees the column
+  // borders inherited by every new row are correct.
+  const invTplRow = findInvTemplateRow(colA, insertAt);
+  const fmtEndCol = CL(Math.max(tdIdx + 10, 30));
+
   for (let i = 0; i < block.length; i++) {
     const row = insertAt + i;
     const b = block[i];
+    // Mirror template row's format (borders / fills / number format / alignment)
+    // first, then layer values + alignment / bold overrides on top.
+    if (invTplRow !== -1) {
+      wsInv.getRange(`A${row}:${fmtEndCol}${row}`).copyFrom(
+        wsInv.getRange(`A${invTplRow}:${fmtEndCol}${invTplRow}`),
+        Excel.RangeCopyType.formats
+      );
+    }
     if (b.text === "") continue;
     wsInv.getRange(`A${row}`).values = [[b.text]];
     wsInv.getRange(`A${row}`).format.font.bold = b.bold;
+    // User requested column A always centre-aligned for inserted descriptions.
+    wsInv.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
     if (b.amt !== 0) {
       wsInv.getRange(`${tgtCol}${row}`).values = [[b.amt]];
       wsInv.getRange(`${tgtCol}${row}`).numberFormat = [[FMT_ACCT]];
