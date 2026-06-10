@@ -790,10 +790,11 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   if (needLCPHdr) block.push({ text: "LCP", bold: true, amt: 0 });
   if (secHeader !== "") block.push({ text: secHeader, bold: true, amt: 0 });
   for (const item of items) block.push({ text: item.desc, bold: item.isHdr, amt: item.amt });
-  // Always end the new section with one blank row for visual spacing — the
-  // next section's first row will sit just below this blank. User asked
-  // specifically: "last me ek blank row hone chahiye".
-  block.push({ text: "", bold: false, amt: 0 });
+  // The trailing-blank that v10 added is REMOVED in v15 — combined with the
+  // leading separator above it produced two blank rows between sections
+  // (user reported "blank row jyada q h ... LCP ke pahle ek row rahe").
+  // The leading separator alone now guarantees exactly one blank row
+  // between sections.
 
   // Always insert fresh rows at insertAt so existing data is NEVER overwritten
   // (pushes the rest — including the LCP section / totals — down).
