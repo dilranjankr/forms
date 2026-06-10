@@ -1545,14 +1545,17 @@ async function runUpdatePR(context: Excel.RequestContext) {
     // new PR column was inheriting border lines from the column it was
     // inserted next to (typically PR#TBB) in rows 1-4 (the status-indicator
     // strip above the PR header). v11's per-slot border-style wipe didn't
-    // fully clear those lines — Office.js sometimes leaves inherited
-    // borders intact when only the style property is reset. Switching to
-    // Excel.ClearApplyTo.all on the upper 4 rows nukes every border slot,
-    // every fill, every number format, every conditional format and any
-    // residual value in one shot — same as Excel's "Clear All" command.
-    // Result matches the existing PR columns (PR#10 etc.) which have
-    // completely empty cells in rows 1-4.
+    // fully clear those lines. Now we do TWO things on the upper 4 rows
+    // of the freshly inserted column:
+    //   1) Excel.ClearApplyTo.all  — nukes every border slot, every fill,
+    //      every number format, every conditional format and any residual
+    //      value in one shot (Excel's "Clear All" command).
+    //   2) Explicit white background fill — the user asked for this as a
+    //      visual guarantee. Even if any border style somehow survives the
+    //      clear, the white fill ensures the strip reads as completely
+    //      blank, matching existing PR columns (PR#10 etc.).
     wsVT.getRange(`${col}1:${col}4`).clear(Excel.ClearApplyTo.all);
+    wsVT.getRange(`${col}1:${col}4`).format.fill.color = "#FFFFFF";
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
