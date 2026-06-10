@@ -1541,6 +1541,26 @@ async function runUpdatePR(context: Excel.RequestContext) {
     newCol.clear(Excel.ClearApplyTo.contents);
     newCol.format.fill.clear();
     newCol.conditionalFormats.clearAll();
+    // User reported "header ke upar jo line aarah hi oh line na aaye" — the
+    // new PR column was inheriting border lines from the column it was
+    // inserted next to in rows 1-4 (the status-indicator strip above the
+    // PR header). The existing PR columns (PR#8 / PR#9 etc.) have no
+    // borders in those upper rows, so the new column should match. Wipe
+    // every border slot on rows 1-4 of the freshly inserted column.
+    const upperRange = wsVT.getRange(`${col}1:${col}4`);
+    const upperBorderSlots: Excel.BorderIndex[] = [
+      Excel.BorderIndex.edgeTop,
+      Excel.BorderIndex.edgeBottom,
+      Excel.BorderIndex.edgeLeft,
+      Excel.BorderIndex.edgeRight,
+      Excel.BorderIndex.insideHorizontal,
+      Excel.BorderIndex.insideVertical,
+      Excel.BorderIndex.diagonalDown,
+      Excel.BorderIndex.diagonalUp,
+    ];
+    for (const slot of upperBorderSlots) {
+      upperRange.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
+    }
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
