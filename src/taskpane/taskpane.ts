@@ -225,8 +225,26 @@ function readForm(): InputFormData {
     const desc = (tr.querySelector(".desc") as HTMLInputElement).value.trim();
     if (desc === "") return;
     const amtRaw = (tr.querySelector(".amt") as HTMLInputElement).value.trim();
-    const amt = amtRaw === "" || isNaN(Number(amtRaw)) ? 0 : Number(amtRaw);
-    items.push({ desc, amt, isHdr: amt === 0 });
+    // Accept user input copy-pasted from Excel / accounting sheets:
+    //   "2,345.16"       → 2345.16     (thousands comma)
+    //   "$2,345.16"      → 2345.16     ($ symbol)
+    //   "(1,234.56)"     → -1234.56    (accounting parens for negatives)
+    //   "-2,345.16"      → -2345.16
+    //   "2345.16"        → 2345.16     (no formatting)
+    // Earlier Number("2,345.16") returned NaN so the amount silently became
+    // 0 — the user's pasted comma-formatted amounts vanished on save.
+    let cleaned = amtRaw.replace(/[$,\s]/g, "");
+    let isNeg = false;
+    if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+      isNeg = true;
+      cleaned = cleaned.substring(1, cleaned.length - 1);
+    }
+    let amt = cleaned === "" || isNaN(Number(cleaned)) ? 0 : Number(cleaned);
+    if (isNeg) amt = -amt;
+    // isHdr stays false here — item descriptions should not become bold just
+    // because the user left the amount blank. Section headers (the secHeader
+    // field, processed separately) remain the only bold rows in a section.
+    items.push({ desc, amt, isHdr: false });
   });
 
   return {
@@ -776,6 +794,37 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     if (insertAt > boundary) insertAt = boundary;
   } else {
     insertAt = grandRow;
+  }
+
+  // Compact any accumulated extra blank rows ABOVE the insertion point
+  // (typically left over from older addin builds that pushed a trailing
+  // blank into every section block). Goal: exactly ONE blank row between
+  // the previous section's last content and the new section that's about
+  // to be inserted. Walk up until we hit non-blank content, then delete
+  // every blank row above the last one so a single blank remains.
+  let walkRow = insertAt - 1;
+  let lastNonBlankRow = -1;
+  while (walkRow >= 5) {
+    const idx = walkRow - 1;
+    if (idx < 0 || idx >= colA.length) { walkRow--; continue; }
+    const v = colA[idx] && colA[idx][0] ? String(colA[idx][0]).trim() : "";
+    if (v !== "") { lastNonBlankRow = walkRow; break; }
+    walkRow--;
+  }
+  if (lastNonBlankRow > 0) {
+    const blanksAbove = insertAt - 1 - lastNonBlankRow;
+    if (blanksAbove > 1) {
+      const deleteCount = blanksAbove - 1;
+      const deleteFrom = lastNonBlankRow + 1;
+      wsInv.getRange(`${deleteFrom}:${deleteFrom + deleteCount - 1}`).delete(Excel.DeleteShiftDirection.up);
+      await context.sync();
+      grandRow -= deleteCount;
+      if (ldpSubRow !== -1) ldpSubRow -= deleteCount;
+      if (lcpSubRow !== -1) lcpSubRow -= deleteCount;
+      if (lcpHdrRow !== -1 && lcpHdrRow >= deleteFrom) lcpHdrRow -= deleteCount;
+      insertAt -= deleteCount;
+      colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
+    }
   }
 
   // One blank separator row between groups: add a blank only if the row above isn't already blank
