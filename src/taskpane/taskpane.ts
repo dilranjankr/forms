@@ -827,23 +827,33 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     }
   }
 
-  // One blank separator row between groups: add a blank only if the row above isn't already blank
+  // One blank separator row between groups: add a blank only if the row above
+  // isn't already blank AND isn't an LDP / LCP section marker. When the
+  // previous row is an "LDP" or "LCP" marker, the new section header must
+  // attach DIRECTLY underneath it (no gap) — same shape the user already
+  // has for the LDP block above (LDP marker followed immediately by
+  // "Change Order - CO#1").
   if (insertAt > 6) {
     const prevRowIdx = insertAt - 2;
     const prevVal = prevRowIdx >= 0 && prevRowIdx < colA.length
       ? (colA[prevRowIdx][0] ? String(colA[prevRowIdx][0]).trim() : "")
       : "";
-    if (prevVal !== "") block.push({ text: "", bold: false, amt: 0 });
+    const prevValU = prevVal.toUpperCase();
+    const isMarker = prevValU === "LDP" || prevValU === "LCP";
+    if (prevVal !== "" && !isMarker) block.push({ text: "", bold: false, amt: 0 });
   }
 
   if (needLCPHdr) block.push({ text: "LCP", bold: true, amt: 0 });
   if (secHeader !== "") block.push({ text: secHeader, bold: true, amt: 0 });
-  for (const item of items) block.push({ text: item.desc, bold: item.isHdr, amt: item.amt });
-  // The trailing-blank that v10 added is REMOVED in v15 — combined with the
-  // leading separator above it produced two blank rows between sections
-  // (user reported "blank row jyada q h ... LCP ke pahle ek row rahe").
-  // The leading separator alone now guarantees exactly one blank row
-  // between sections.
+  for (const item of items) block.push({ text: item.desc, bold: false, amt: item.amt });
+  // Trailing blank row above Grand-TOTALS: insertions that land at grandRow
+  // (LCP / Change Order — the 'else' branch in the insertAt block) must
+  // leave one blank row between their last item and the SUB-TOTALS /
+  // Grand-TOTALS band sitting directly below. User reported: "Grand totals
+  // ke upar blank row q nhi h". LDP inserts go higher up the sheet and the
+  // gap to the LCP marker is handled by the next save's leading-separator,
+  // so we only push the trailing blank when secType is not 'LDP'.
+  if (secType !== "LDP") block.push({ text: "", bold: false, amt: 0 });
 
   // Always insert fresh rows at insertAt so existing data is NEVER overwritten
   // (pushes the rest — including the LCP section / totals — down).
