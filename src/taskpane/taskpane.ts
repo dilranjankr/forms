@@ -1543,24 +1543,16 @@ async function runUpdatePR(context: Excel.RequestContext) {
     newCol.conditionalFormats.clearAll();
     // User reported "header ke upar jo line aarah hi oh line na aaye" — the
     // new PR column was inheriting border lines from the column it was
-    // inserted next to in rows 1-4 (the status-indicator strip above the
-    // PR header). The existing PR columns (PR#8 / PR#9 etc.) have no
-    // borders in those upper rows, so the new column should match. Wipe
-    // every border slot on rows 1-4 of the freshly inserted column.
-    const upperRange = wsVT.getRange(`${col}1:${col}4`);
-    const upperBorderSlots: Excel.BorderIndex[] = [
-      Excel.BorderIndex.edgeTop,
-      Excel.BorderIndex.edgeBottom,
-      Excel.BorderIndex.edgeLeft,
-      Excel.BorderIndex.edgeRight,
-      Excel.BorderIndex.insideHorizontal,
-      Excel.BorderIndex.insideVertical,
-      Excel.BorderIndex.diagonalDown,
-      Excel.BorderIndex.diagonalUp,
-    ];
-    for (const slot of upperBorderSlots) {
-      upperRange.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
-    }
+    // inserted next to (typically PR#TBB) in rows 1-4 (the status-indicator
+    // strip above the PR header). v11's per-slot border-style wipe didn't
+    // fully clear those lines — Office.js sometimes leaves inherited
+    // borders intact when only the style property is reset. Switching to
+    // Excel.ClearApplyTo.all on the upper 4 rows nukes every border slot,
+    // every fill, every number format, every conditional format and any
+    // residual value in one shot — same as Excel's "Clear All" command.
+    // Result matches the existing PR columns (PR#10 etc.) which have
+    // completely empty cells in rows 1-4.
+    wsVT.getRange(`${col}1:${col}4`).clear(Excel.ClearApplyTo.all);
     wsVT.getRange(`${col}5`).values = [[pr.name]];
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
