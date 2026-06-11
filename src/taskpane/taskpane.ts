@@ -2439,23 +2439,20 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     }
     await context.sync();
 
-    // Also queue every source-blank row (invoice-worksheet section
-    // separators + the leading / trailing sentinel blanks the snapshot
-    // builder pads dataRows with) for physical deletion. Earlier these
-    // were left in place as visible empty rows even though the row had
-    // no value for THIS PR — user reported: "jis row me value h invoice
-    // worksheet me oh save nhi pr me to uska blank row reh raha h jo ki
-    // nhi chchiaye". Including them in blankRowsToDelete tightens the
-    // snapshot to only the rows that this PR (or any earlier PR) actually
-    // billed.
-    for (let i = 0; i < dataRows.length; i++) {
-      if (dataRows[i].isBlank) blankRowsToDelete.push(tbbStart + i);
-    }
-
     // Finally, physically remove the rows we blanked above. Done LAST so the
     // SUB-TOTALS and the Total Paid SUM formula are already in place — Excel
     // adjusts their row references automatically as rows shift up. Deleted in
     // descending order so earlier deletions don't invalidate later indices.
+    //
+    // Only the rows that ALREADY landed in blankRowsToDelete via the
+    // Phase 3 '!keep' branch are deleted — those are rows the snapshot
+    // builder itself blanked because this PR (and every prior PR) had no
+    // value for them. Rows that were ALREADY blank on the Invoice
+    // Worksheet (legitimate section separators between LDP / LCP / CO
+    // blocks) are intentionally LEFT IN PLACE: the snapshot mirrors the
+    // invoice's row shape, so a blank separator on the invoice has to
+    // stay a blank separator on the snapshot. v18 wrongly added every
+    // source-blank row to this queue and that was reverted here.
     if (blankRowsToDelete.length > 0) {
       blankRowsToDelete.sort((a, b) => b - a);
       for (const row of blankRowsToDelete) {
