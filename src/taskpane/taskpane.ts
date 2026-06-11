@@ -1095,6 +1095,12 @@ async function addVendorTrackingRow(
   // left-aligned). Forcing centre here keeps every contract row
   // visually identical regardless of section.
   ws.getRange(`A${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  // Force 9pt across the whole contract row so LDP and LCP rows match.
+  // Inserted rows in LDP sections were inheriting a 12pt template font
+  // while LCP sections inherited 9pt, which made the two sections look
+  // visually inconsistent. Hard-coding 9pt keeps every contract row the
+  // same size regardless of which side of the section divider it lands on.
+  ws.getRange(`A${vtRow}:E${vtRow}`).format.font.size = 9;
   if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtHours !== "") { ws.getRange(`D${vtRow}`).values = [[vtHours]]; ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]]; }
@@ -2597,6 +2603,10 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
     // left-aligned depending on what alignment was inherited from the
     // template row.
     wsVT.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    // Force 9pt to match the contract description rows above and avoid
+    // size inheritance flipping between 9pt / 12pt depending on which
+    // template row Excel picked for the insert.
+    wsVT.getRange(`A${row}:H${row}`).format.font.size = 9;
     if (e.poNum) wsVT.getRange(`E${row}`).values = [[e.poNum]];
     wsVT.getRange(`F${row}`).values = [[e.amount]]; wsVT.getRange(`F${row}`).numberFormat = [[FMT_ACCT]];
     if (e.adj !== 0) { wsVT.getRange(`G${row}`).values = [[e.adj]]; wsVT.getRange(`G${row}`).numberFormat = [[FMT_ACCT]]; }
@@ -2782,6 +2792,9 @@ async function runContractAdjust(context: Excel.RequestContext, poNumber: string
   // already in Vendor Tracking (user asked every VT column-A write to
   // land centre-aligned regardless of code path).
   wsVT.getRange(`A${targetRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  // Lock font size to 9pt so PO-move rows match contract / vendor rows
+  // visually instead of inheriting whatever size the surrounding rows had.
+  wsVT.getRange(`A${targetRow}:E${targetRow}`).format.font.size = 9;
   wsVT.getRange(`B${targetRow}`).clear(Excel.ClearApplyTo.contents);
   wsVT.getRange(`C${targetRow}`).values = [[finalAmount]];
   wsVT.getRange(`C${targetRow}`).numberFormat = [[FMT_ACCT]];
