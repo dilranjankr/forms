@@ -1088,6 +1088,13 @@ async function addVendorTrackingRow(
 
   ws.getRange(`A${vtRow}`).values = [[contractName]];
   ws.getRange(`A${vtRow}:E${vtRow}`).format.font.bold = true;
+  // User asked every Vendor Tracking save (LDP / LCP / PO) to land
+  // centre-aligned in column A. Inserted rows in LDP and LCP sections
+  // were inheriting different alignments depending on where the
+  // insertion landed (LDP rows looked centred, LCP rows looked
+  // left-aligned). Forcing centre here keeps every contract row
+  // visually identical regardless of section.
+  ws.getRange(`A${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
   if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtHours !== "") { ws.getRange(`D${vtRow}`).values = [[vtHours]]; ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]]; }
@@ -2584,6 +2591,12 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
     const e = entries[i];
     wsVT.getRange(`A${row}`).values = [[e.vendor]];
     wsVT.getRange(`A${row}:H${row}`).format.font.bold = false; // vendor row must be normal, not bold (inherited from contract header)
+    // Centre-align column A on every PO vendor row so it lines up with
+    // the contract description rows above (which get centred by
+    // addVendorTrackingRow). Without this, vendor rows could end up
+    // left-aligned depending on what alignment was inherited from the
+    // template row.
+    wsVT.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
     if (e.poNum) wsVT.getRange(`E${row}`).values = [[e.poNum]];
     wsVT.getRange(`F${row}`).values = [[e.amount]]; wsVT.getRange(`F${row}`).numberFormat = [[FMT_ACCT]];
     if (e.adj !== 0) { wsVT.getRange(`G${row}`).values = [[e.adj]]; wsVT.getRange(`G${row}`).numberFormat = [[FMT_ACCT]]; }
@@ -2765,6 +2778,10 @@ async function runContractAdjust(context: Excel.RequestContext, poNumber: string
 
   wsVT.getRange(`A${targetRow}:E${targetRow}`).format.font.bold = false;
   wsVT.getRange(`A${targetRow}`).values = [[description]];
+  // Centre-align so this PO-move row matches the contract / vendor rows
+  // already in Vendor Tracking (user asked every VT column-A write to
+  // land centre-aligned regardless of code path).
+  wsVT.getRange(`A${targetRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
   wsVT.getRange(`B${targetRow}`).clear(Excel.ClearApplyTo.contents);
   wsVT.getRange(`C${targetRow}`).values = [[finalAmount]];
   wsVT.getRange(`C${targetRow}`).numberFormat = [[FMT_ACCT]];
