@@ -1134,8 +1134,19 @@ async function addVendorTrackingRow(
   // visually inconsistent. Hard-coding 9pt keeps every contract row the
   // same size regardless of which side of the section divider it lands on.
   ws.getRange(`A${vtRow}:E${vtRow}`).format.font.size = 9;
-  if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
-  if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
+  if (vtTotal !== "") {
+    ws.getRange(`B${vtRow}`).values = [[vtTotal]];
+    ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]];
+    // Centre-align Contract Total so column B stays consistent with the
+    // surrounding centre-aligned cells (A description, D hours, E PO).
+    ws.getRange(`B${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  }
+  if (vtCost !== "") {
+    ws.getRange(`C${vtRow}`).values = [[vtCost]];
+    ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]];
+    // Centre-align Contract Cost to match the rest of the contract row.
+    ws.getRange(`C${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  }
   if (vtHours !== "") {
     ws.getRange(`D${vtRow}`).values = [[vtHours]];
     ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]];
@@ -2849,6 +2860,10 @@ async function runContractAdjust(context: Excel.RequestContext, poNumber: string
   wsVT.getRange(`B${targetRow}`).clear(Excel.ClearApplyTo.contents);
   wsVT.getRange(`C${targetRow}`).values = [[finalAmount]];
   wsVT.getRange(`C${targetRow}`).numberFormat = [[FMT_ACCT]];
+  // Centre-align the contract-adjustment amount so column C matches the
+  // Contract Cost centring in addVendorTrackingRow and the rest of the
+  // VT centred columns (A, D, E).
+  wsVT.getRange(`C${targetRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
   wsVT.getRange(`D${targetRow}`).clear(Excel.ClearApplyTo.contents);
   wsVT.getRange(`E${targetRow}`).clear(Excel.ClearApplyTo.contents);
   await context.sync();
