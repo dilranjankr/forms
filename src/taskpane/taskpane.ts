@@ -877,6 +877,19 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   const invTplRow = findInvTemplateRow(colA, insertAt);
   const fmtEndCol = CL(Math.max(tdIdx + 10, 30));
 
+  // Slots that draw horizontal lines across cells — wiping these on a
+  // freshly-inserted row removes stray horizontal borders inherited from
+  // the row above the insertion (which Excel's default 'Format Same As
+  // Above' carries forward). Vertical / inside-vertical slots are NOT
+  // wiped so the column-divider pattern stays intact.
+  const horizSlots: Excel.BorderIndex[] = [
+    Excel.BorderIndex.edgeTop,
+    Excel.BorderIndex.edgeBottom,
+    Excel.BorderIndex.insideHorizontal,
+    Excel.BorderIndex.diagonalDown,
+    Excel.BorderIndex.diagonalUp,
+  ];
+
   for (let i = 0; i < block.length; i++) {
     const row = insertAt + i;
     const b = block[i];
@@ -887,6 +900,17 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         wsInv.getRange(`A${invTplRow}:${fmtEndCol}${invTplRow}`),
         Excel.RangeCopyType.formats
       );
+    }
+    // Wipe horizontal cell borders across the FULL row width — the
+    // copyFrom above only covers A:fmtEndCol (~A:AD), so the PR /
+    // Paid-to-Date / Completed / Balance / Notes columns (BK-BO and
+    // beyond) inherited their borders directly from the row above the
+    // insertion point. User reported stray bordered cells in rows
+    // 152-154 in exactly that band; this wipe removes them on every
+    // future insert.
+    const fullWipe = wsInv.getRange(`A${row}:${CL(200)}${row}`);
+    for (const slot of horizSlots) {
+      fullWipe.format.borders.getItem(slot).style = Excel.BorderLineStyle.none;
     }
     if (b.text === "") continue;
     wsInv.getRange(`A${row}`).values = [[b.text]];
@@ -1103,7 +1127,13 @@ async function addVendorTrackingRow(
   ws.getRange(`A${vtRow}:E${vtRow}`).format.font.size = 9;
   if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
-  if (vtHours !== "") { ws.getRange(`D${vtRow}`).values = [[vtHours]]; ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]]; }
+  if (vtHours !== "") {
+    ws.getRange(`D${vtRow}`).values = [[vtHours]];
+    ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]];
+    // Centre-align Management Hours so the column looks consistent with the
+    // centre-aligned description (A) and EST / PO number (E) cells.
+    ws.getRange(`D${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  }
   if (vtPO !== "") {
     ws.getRange(`E${vtRow}`).values = [[vtPO]];
     ws.getRange(`E${vtRow}`).numberFormat = [["@"]];
