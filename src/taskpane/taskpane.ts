@@ -2439,6 +2439,19 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     }
     await context.sync();
 
+    // Also queue every source-blank row (invoice-worksheet section
+    // separators + the leading / trailing sentinel blanks the snapshot
+    // builder pads dataRows with) for physical deletion. Earlier these
+    // were left in place as visible empty rows even though the row had
+    // no value for THIS PR — user reported: "jis row me value h invoice
+    // worksheet me oh save nhi pr me to uska blank row reh raha h jo ki
+    // nhi chchiaye". Including them in blankRowsToDelete tightens the
+    // snapshot to only the rows that this PR (or any earlier PR) actually
+    // billed.
+    for (let i = 0; i < dataRows.length; i++) {
+      if (dataRows[i].isBlank) blankRowsToDelete.push(tbbStart + i);
+    }
+
     // Finally, physically remove the rows we blanked above. Done LAST so the
     // SUB-TOTALS and the Total Paid SUM formula are already in place — Excel
     // adjusts their row references automatically as rows shift up. Deleted in
