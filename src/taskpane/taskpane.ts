@@ -1437,25 +1437,33 @@ async function updateAllFormulas(
 
     ws.getRange(`${tdCol}${r}`).formulas = [[`=IF(SUMPRODUCT(--(B${r}:${lastCO}${r}<>""))=0,"",SUM(B${r}:${lastCO}${r}))`]];
     ws.getRange(`${tdCol}${r}`).numberFormat = [[FMT_USD]];
+    // Right-align Total To date so the numeric value doesn't end up
+    // left-aligned by inherited template formatting (same fix family
+    // as v24 for the CO / PR amount columns).
+    ws.getRange(`${tdCol}${r}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
 
     if (hCol && prS) {
       // Paid to Date: SUM of all PR amounts minus PR#TBB (last PR col)
       ws.getRange(`${hCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",SUM(${prS}${r}:${prE}${r})-${prE}${r})`]];
       ws.getRange(`${hCol}${r}`).numberFormat = [[FMT_ACCT]];
+      ws.getRange(`${hCol}${r}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
     }
     if (cCol && prS) {
       // Completed to Date: SUM of all PR amounts including PR#TBB
       ws.getRange(`${cCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",SUM(${prS}${r}:${prE}${r}))`]];
       ws.getRange(`${cCol}${r}`).numberFormat = [[FMT_ACCT]];
+      ws.getRange(`${cCol}${r}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
     }
     if (pCol) {
       ws.getRange(`${pCol}${r}`).formulas = [[`=IFERROR(SUM(${cCol}${r}/${tdCol}${r}),"")`]];
       ws.getRange(`${pCol}${r}`).numberFormat = [["0%"]];
+      ws.getRange(`${pCol}${r}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
     }
     if (bCol) {
       // Balance to Finish: TotalToDate - Completed (only guards against blank TD)
       ws.getRange(`${bCol}${r}`).formulas = [[`=IF(${tdCol}${r}="","",(${tdCol}${r}-${cCol}${r}))`]];
       ws.getRange(`${bCol}${r}`).numberFormat = [[FMT_USD]];
+      ws.getRange(`${bCol}${r}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
     }
   }
 
@@ -1511,6 +1519,11 @@ function setTotalsRow(ws: Excel.Worksheet, hdr2: (string | number | boolean)[], 
     } else {
       ws.getRange(`${col}${row}`).formulas = [[`=SUM(${col}${s}:${col}${e})`]];
     }
+    // Right-align every numeric cell in the totals row so the SUB-TOTAL /
+    // Grand-TOTAL values match the per-row right alignment applied in
+    // updateAllFormulas above. Without this, totals rows could end up
+    // left-aligned by inherited template formatting.
+    ws.getRange(`${col}${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
   }
 }
 
