@@ -1104,7 +1104,14 @@ async function addVendorTrackingRow(
   if (vtTotal !== "") { ws.getRange(`B${vtRow}`).values = [[vtTotal]]; ws.getRange(`B${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtCost !== "") { ws.getRange(`C${vtRow}`).values = [[vtCost]]; ws.getRange(`C${vtRow}`).numberFormat = [[FMT_ACCT]]; }
   if (vtHours !== "") { ws.getRange(`D${vtRow}`).values = [[vtHours]]; ws.getRange(`D${vtRow}`).numberFormat = [["0.00"]]; }
-  if (vtPO !== "") { ws.getRange(`E${vtRow}`).values = [[vtPO]]; ws.getRange(`E${vtRow}`).numberFormat = [["@"]]; }
+  if (vtPO !== "") {
+    ws.getRange(`E${vtRow}`).values = [[vtPO]];
+    ws.getRange(`E${vtRow}`).numberFormat = [["@"]];
+    // Centre-align the EST / PO number cell so it matches the column A
+    // alignment forced earlier. User asked the EST number column to land
+    // centre-aligned for every save.
+    ws.getRange(`E${vtRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  }
   await context.sync();
 
   const next = await readValues(context, ws.getRange(`A${vtRow + 1}:E${vtRow + 1}`));
@@ -2607,7 +2614,12 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
     // size inheritance flipping between 9pt / 12pt depending on which
     // template row Excel picked for the insert.
     wsVT.getRange(`A${row}:H${row}`).format.font.size = 9;
-    if (e.poNum) wsVT.getRange(`E${row}`).values = [[e.poNum]];
+    if (e.poNum) {
+      wsVT.getRange(`E${row}`).values = [[e.poNum]];
+      // Match the column-A centre alignment so every PO number lands
+      // visually consistent with the contract / vendor description rows.
+      wsVT.getRange(`E${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    }
     wsVT.getRange(`F${row}`).values = [[e.amount]]; wsVT.getRange(`F${row}`).numberFormat = [[FMT_ACCT]];
     if (e.adj !== 0) { wsVT.getRange(`G${row}`).values = [[e.adj]]; wsVT.getRange(`G${row}`).numberFormat = [[FMT_ACCT]]; }
     wsVT.getRange(`H${row}`).formulas = [[`=SUM(F${row}:G${row})`]]; wsVT.getRange(`H${row}`).numberFormat = [[FMT_ACCT]];
