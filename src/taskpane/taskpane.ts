@@ -741,6 +741,9 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         if (colA[r][0] && String(colA[r][0]).trim() === item.desc) {
           wsInv.getRange(`${tgtCol}${r + 1}`).values = [[item.amt]];
           wsInv.getRange(`${tgtCol}${r + 1}`).numberFormat = [[FMT_ACCT]];
+          // Right-align amount cells so numbers don't end up left-aligned
+          // by inherited template formatting.
+          wsInv.getRange(`${tgtCol}${r + 1}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
           matched = true;
           break;
         }
@@ -769,6 +772,9 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
         wsInv.getRange(`A${insertRow}`).format.font.color = "#000000";
         wsInv.getRange(`${tgtCol}${insertRow}`).values = [[item.amt]];
         wsInv.getRange(`${tgtCol}${insertRow}`).numberFormat = [[FMT_ACCT]];
+        // Right-align amount cells so numbers don't end up left-aligned
+        // by inherited template formatting.
+        wsInv.getRange(`${tgtCol}${insertRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
         grandRow++;
         colA = await readValues(context, wsInv.getRange(`A1:A${invLast}`));
       }
@@ -923,6 +929,9 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
     if (b.amt !== 0) {
       wsInv.getRange(`${tgtCol}${row}`).values = [[b.amt]];
       wsInv.getRange(`${tgtCol}${row}`).numberFormat = [[FMT_ACCT]];
+      // Right-align amount cells so numbers don't end up left-aligned
+      // by inherited template formatting.
+      wsInv.getRange(`${tgtCol}${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.right;
     }
     if (b.text === "LCP" && b.bold && needLCPHdr) lcpHdrRow = row;
   }
