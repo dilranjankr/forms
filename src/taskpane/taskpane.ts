@@ -881,7 +881,19 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   // rows. Copying from a known good template row guarantees the column
   // borders inherited by every new row are correct.
   const invTplRow = findInvTemplateRow(colA, insertAt);
-  const fmtEndCol = CL(Math.max(tdIdx + 10, 30));
+  // Mirror template format across the FULL row width (A → GR, 200 cols)
+  // instead of just A:fmtEndCol (~A:AD). Earlier the copyFrom was limited
+  // to the CO band, so the right-side columns (Paid to Date / Payment
+  // Request / Completed / % Completed / Balance to Finish — BL-BP) kept
+  // inheriting whatever default border state Excel's "Format Same As
+  // Above" produced. On a Steele-style sheet that gave a 'border break'
+  // visible after row ~200 (some new rows had column dividers in BL-BP,
+  // adjacent ones didn't). Extending copyFrom to GR carries the
+  // template's full per-cell border / fill / number-format pattern
+  // across the entire row so every column draws the same vertical
+  // dividers and the only horizontal borders are the ones the v23 wipe
+  // strips off again below.
+  const fmtEndCol = CL(200);
 
   // Slots that draw horizontal lines across cells — wiping these on a
   // freshly-inserted row removes stray horizontal borders inherited from
