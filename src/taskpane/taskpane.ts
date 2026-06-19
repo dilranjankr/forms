@@ -1695,8 +1695,37 @@ async function runUpdatePR(context: Excel.RequestContext) {
     else if (curLDPTot !== -1) insertAt = curLDPTot;
     if (insertAt === -1) continue;
     const col = CL(insertAt);
-    wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
-    await context.sync();
+
+    // Retry the column-insert + sync up to 3 times with backoff. Excel +
+    // AutoSave + OneDrive sync transient state often makes the first
+    // attempt fail with "internal error while processing the request"
+    // — subsequent attempts after a short wait usually succeed. If all
+    // 3 attempts fail, throw a clear actionable message instead of the
+    // generic Excel.js error.
+    let insertedOk = false;
+    let lastInsertErr: unknown = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        wsVT.getRange(`${col}:${col}`).insert(Excel.InsertShiftDirection.right);
+        await context.sync();
+        insertedOk = true;
+        break;
+      } catch (e) {
+        lastInsertErr = e;
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
+    }
+    if (!insertedOk) {
+      const m = lastInsertErr && (lastInsertErr as Error).message ? (lastInsertErr as Error).message : String(lastInsertErr);
+      throw new Error(
+        `Column insert for ${pr.name} failed after 3 attempts: ${m}. ` +
+        `This is usually caused by an AutoSave + OneDrive sync conflict. ` +
+        `Please turn AutoSave OFF (top-left of Excel), wait for the cloud icon ` +
+        `to show "Saved", then click Repair Formulas or Save to Workbook again.`
+      );
+    }
     // Drop the bad inherited stuff (formulas / values / yellow fill / conditional formats)
     // but KEEP borders / font / number-format so the column still looks bordered.
     const newCol = wsVT.getRange(`${col}1:${col}100`);
