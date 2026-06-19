@@ -1751,6 +1751,16 @@ async function runUpdatePR(context: Excel.RequestContext) {
     wsVT.getRange(`${col}6`).formulas = [[`='LDP & LCP - Invoice Worksheet'!${CL(pr.col)}${grandRow}`]];
     wsVT.getRange(`${col}6`).numberFormat = [[FMT_ACCT]];
 
+    // Commit the header / row-6 writes BEFORE attempting the per-vendor
+    // copyFrom. If the copyFrom later throws (PR#TBB column structurally
+    // bad on this workbook, merged source range, etc.) Office.js would
+    // otherwise roll back every operation queued since the last sync —
+    // including these writes — leaving the user with a freshly inserted
+    // but completely blank column ("column ban raha h pr value nhi save
+    // ho rahi"). Splitting the sync here makes the PR name + grand-total
+    // formula durable even when copyFrom can't run.
+    await context.sync();
+
     // Mirror PR#TBB's formulas (per-vendor rows + sub-contractor / client
     // totals + Project Indicator rows like Total Cost LCP / Cost Percentage
     // / Total Left to Pay Vendors) into the new PR column. Excel's
@@ -1760,26 +1770,24 @@ async function runUpdatePR(context: Excel.RequestContext) {
     // from PR#TBB-VT to the new PR-VT correctly lands on the new PR
     // column in the Invoice Worksheet.
     //
-    // Previously this copyFrom started at indicRow (~row 23) which left
-    // the per-vendor band (row 7 → indicRow-1) BLANK in the new PR
-    // column. Now we copy from row 7 so vendor cells inherit the same
-    // formula shape (SUMIF / direct reference to Invoice) that PR#TBB
-    // uses, just retargeted to the new PR column.
+    // copyFrom is now wrapped in try/catch so a failure here only loses
+    // the per-vendor mirror — the header / grand-total writes above
+    // already committed, so the user is never left with a blank column.
+    // They can re-run Repair Formulas later to retry just the mirror.
     const tbbColIdx = insertAt + 1; // PR#TBB shifted right by 1 after the insert above
-    // Extend the formula-mirror down through the LAST used row of VT, not
-    // just the (often missed) 'Project Indicators are Below' band. In the
-    // Steele workbook 'Project Indicators' text doesn't exist anywhere in
-    // A1:Z60 so indicRow defaults to 23 and indicLastRow = 48 — that
-    // misses the LCP Analysis rows at 79-84 (Client total, Sub-Contractor
-    // Total, Percentage, Gross Margin), leaving PR#24 row 80 / 82 / 83
-    // blank because nothing copies them and the post-loop writes only
-    // touch clientRow + subContRow specifically.
     const copyEndRow = Math.max(indicLastRow, vtLast);
-    wsVT.getRange(`${col}7:${col}${copyEndRow}`).copyFrom(
-      wsVT.getRange(`${CL(tbbColIdx)}7:${CL(tbbColIdx)}${copyEndRow}`),
-      Excel.RangeCopyType.formulas
-    );
-    await context.sync();
+    try {
+      wsVT.getRange(`${col}7:${col}${copyEndRow}`).copyFrom(
+        wsVT.getRange(`${CL(tbbColIdx)}7:${CL(tbbColIdx)}${copyEndRow}`),
+        Excel.RangeCopyType.formulas
+      );
+      await context.sync();
+    } catch (_copyErr) {
+      // Per-vendor formulas couldn't be mirrored. The PR name + grand-
+      // total formula are already committed above, so the new column is
+      // visible with its identifying name and grand-total link; the
+      // per-vendor band stays blank until the next Repair Formulas run.
+    }
   }
 
   const fin = (await readValues(context, wsVT.getRange("A5").getResizedRange(0, 200)))[0];
