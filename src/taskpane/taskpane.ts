@@ -2607,9 +2607,27 @@ async function runLoadEst(context: Excel.RequestContext): Promise<string[]> {
   await context.sync();
   if (wsVT.isNullObject) throw new Error("Vendor Tracking sheet not found.");
 
-  const vtA = await readValues(context, wsVT.getRange("A7:A50"));
-  const vtB = await readValues(context, wsVT.getRange("B7:B50"));
-  const vtE = await readValues(context, wsVT.getRange("E7:E50"));
+  // Dynamic upper bound — find the "Client total Contract/Cost" row in
+  // column A and use the row just above it as the end of the contracts
+  // band. Earlier this was hardcoded to row 50, which silently missed
+  // every contract sitting in rows 51+ on workbooks where the band
+  // extends further down. User asked: "Client total Contract/Cost iske
+  // upar wale row tk le".
+  const vtLast = await getSafeLastRow(context, wsVT, 100);
+  const scanA = await readValues(context, wsVT.getRange(`A7:A${vtLast}`));
+  let endRow = vtLast;
+  for (let r = 0; r < scanA.length; r++) {
+    const a = scanA[r][0] ? String(scanA[r][0]).trim() : "";
+    if (a.includes("Client total") || a.includes("Client Total")) {
+      endRow = r + 6;
+      break;
+    }
+  }
+  if (endRow < 7) endRow = 7;
+
+  const vtA = await readValues(context, wsVT.getRange(`A7:A${endRow}`));
+  const vtB = await readValues(context, wsVT.getRange(`B7:B${endRow}`));
+  const vtE = await readValues(context, wsVT.getRange(`E7:E${endRow}`));
 
   const contracts: string[] = [];
   for (let r = 0; r < vtA.length; r++) {
