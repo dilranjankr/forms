@@ -6,8 +6,16 @@
 
 /* global console, document, Excel, Office */
 
-const FMT_ACCT = '_("$"* #,##0.00_);_("$"* (#,##0.00);_("$"* "-"??_);_(@_)';
-const FMT_USD = '"$"#,##0.00';
+// Use locale-explicit US Dollar markers ([$$-409]) so the currency symbol
+// stays $ regardless of the workbook viewer's regional settings. The
+// previous bare "$" in the format string was being auto-localised by Excel
+// on machines whose Windows / Office locale was set to en-IN (or any
+// non-US locale), so cells got rendered with ₹ (Rupee) instead of $.
+// [$$-409] is the Excel format-code shorthand for "US Dollar symbol,
+// en-US locale" and is identical to the manual Format Cells > Currency
+// (English (United States)) preset.
+const FMT_ACCT = '_-[$$-409]* #,##0.00_-;-[$$-409]* #,##0.00_-;_-[$$-409]* "-"??_-;_-@_-';
+const FMT_USD = '[$$-409]#,##0.00';
 
 interface Item { desc: string; amt: number; isHdr: boolean; }
 interface InputFormData {
