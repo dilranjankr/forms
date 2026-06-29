@@ -2357,12 +2357,13 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
     let newTotalPaid = -1;
     for (let r = 0; r < g.length; r++) { if (g[r][0] && String(g[r][0]).includes("Total Paid")) { newTotalPaid = r + 1; break; } }
     if (newTotalPaid !== -1) {
-      // Insert exactly payments.length rows (no extra blank row) so payments
-      // sit flush right under 'Invoiced to Date' with no gap above the first
-      // payment line. Previous logic inserted payments.length + 1 rows and
-      // skipped the first one as a visual separator, which the user does not
-      // want.
-      const totalInsert = payments.length;
+      // Insert payments.length + 1 rows: the first payments.length rows
+      // hold the actual payment lines (flush under 'Invoiced to Date' with
+      // no gap above), and the LAST inserted row is left blank so a single
+      // blank row sits between the last payment line and the 'Total Paid
+      // To date' row that gets pushed down. User asked: "Total Paid To
+      // date ke upar ek blank row add karo".
+      const totalInsert = payments.length + 1;
       const insertAt = newTotalPaid;
       wsTBB.getRange(`${insertAt}:${insertAt + totalInsert - 1}`).insert(Excel.InsertShiftDirection.down);
       wsTBB.getRange(`A${insertAt}:M${insertAt + totalInsert - 1}`).clear(Excel.ClearApplyTo.formats);
@@ -2374,6 +2375,7 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         wsTBB.getRange(`I${r}`).values = [[payments[i].amount]];
         wsTBB.getRange(`I${r}`).numberFormat = [[fmt]];
       }
+      // Row 'insertAt + payments.length' stays blank (the new gap row).
       const finalTpRow = newTotalPaid + totalInsert;
       // Total Paid To date = SUM down column I from SUB-TOTALS row through
       // every payment row just above this Total Paid row.
