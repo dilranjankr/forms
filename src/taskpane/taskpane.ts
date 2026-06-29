@@ -7,14 +7,26 @@
 /* global console, document, Excel, Office */
 
 // Use locale-explicit US Dollar markers ([$$-409]) so the currency symbol
-// stays $ regardless of the workbook viewer's regional settings. The
-// previous bare "$" in the format string was being auto-localised by Excel
-// on machines whose Windows / Office locale was set to en-IN (or any
-// non-US locale), so cells got rendered with ₹ (Rupee) instead of $.
-// [$$-409] is the Excel format-code shorthand for "US Dollar symbol,
-// en-US locale" and is identical to the manual Format Cells > Currency
-// (English (United States)) preset.
-const FMT_ACCT = '_-[$$-409]* #,##0.00_-;-[$$-409]* #,##0.00_-;_-[$$-409]* "-"??_-;_-@_-';
+// stays $ regardless of the workbook viewer's regional settings, AND use
+// the standard en-US Accounting layout where negatives wrap in
+// parentheses (e.g. "$ (4,167.50)") instead of the Indian-style "-$
+// 4,167.50". Matches the format the user already has on the Payments
+// sheet so PR#TBB and PR snapshot payment rows render identically.
+//
+// Format syntax (4 sections separated by ';'):
+//   positive ; negative ; zero ; text
+//
+//   _( ... _)   leave a space the width of '(' / ')' so positives
+//               align under negatives that have actual parens.
+//   [$$-409]    US Dollar symbol locked to en-US locale.
+//   * (space)   pad with spaces between the symbol and the number so
+//               the symbol sticks to the left edge of the cell.
+//   #,##0.00    number with thousands separator and 2 decimals.
+//   (#,##0.00)  literal parens around the number (negative case).
+//   "-"??       literal dash followed by two width-? placeholders so
+//               zeros render as "$ -   ".
+//   @           text passthrough.
+const FMT_ACCT = '_([$$-409]* #,##0.00_);_([$$-409]* (#,##0.00);_([$$-409]* "-"??_);_(@_)';
 const FMT_USD = '[$$-409]#,##0.00';
 
 interface Item { desc: string; amt: number; isHdr: boolean; }
