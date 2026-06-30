@@ -1339,7 +1339,17 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
   const ldpTotalCol = ldpTotalIdx !== -1 ? CL(ldpTotalIdx) : "";
   const lcpTotalCol = lcpTotalIdx !== -1 ? CL(lcpTotalIdx) : "";
 
-  const rows = await readValues(context, wsVT.getRange("A6:E80")); // A..E
+  // Dynamic row range — earlier the read was hardcoded to A6:E80, which
+  // silently skipped every vendor row past row 80 on bigger projects so
+  // their LCP Total / LDP Total column never received the
+  // '=POTotal + SUM(...prs)' formula. User reported: "Total column me
+  // update nhi ho raha h". Switched to getSafeLastRow so the scan
+  // automatically extends to whatever the workbook actually uses. The
+  // existing inner break conditions ('Client total' / 'Analysis' / blank
+  // gap row) still stop the walk at the analysis band, so we don't
+  // accidentally process the post-vendor totals rows.
+  const vtLast = await getSafeLastRow(context, wsVT, 80);
+  const rows = await readValues(context, wsVT.getRange(`A6:E${vtLast}`)); // A..E
   let section = "LDP"; // driven by bold "LDP"/"LCP" marker rows in column A
   for (let i = 0; i < rows.length; i++) {
     const row = i + 6;
