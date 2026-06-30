@@ -26,7 +26,12 @@
 //   "-"??       literal dash followed by two width-? placeholders so
 //               zeros render as "$ -   ".
 //   @           text passthrough.
-const FMT_ACCT = '_([$$-409]* #,##0.00_);_([$$-409]* (#,##0.00);_([$$-409]* "-"??_);_(@_)';
+// Zero section now uses #,##0.00 instead of the accounting-style "-"??,
+// so cells with a 0 value render as '$ 0.00' rather than '$ -'. User
+// asked: 'abhi $-- blank dikh raha h aise usme $0.00 dikhana chahiye'.
+// Positive / negative sections are unchanged (v32 en-US accounting
+// style with parens negatives and [$$-409] locale lock).
+const FMT_ACCT = '_([$$-409]* #,##0.00_);_([$$-409]* (#,##0.00);_([$$-409]* #,##0.00_);_(@_)';
 const FMT_USD = '[$$-409]#,##0.00';
 
 interface Item { desc: string; amt: number; isHdr: boolean; }
