@@ -193,10 +193,22 @@ async function contractAdjust() {
   const desc = (document.getElementById("poAdjDesc") as HTMLInputElement).value.trim();
   if (!poNumber) { setStatus("Select the Contract / PO Number (Source) first.", "err"); return; }
   if (desc === "") { setStatus("Enter a Contract Description.", "err"); return; }
-  if (amtRaw === "" || isNaN(Number(amtRaw))) { setStatus("Enter a valid Contract Adjust amount.", "err"); return; }
+  // Strip $ / commas / whitespace and honour accounting parens for
+  // negatives, matching the v16 Invoice Form parser. Earlier the bare
+  // Number(amtRaw) rejected any comma-formatted paste like "2,345.16"
+  // with the "Enter a valid amount" error, so users had to manually
+  // remove commas before pasting.
+  let cleanedAdj = amtRaw.replace(/[$,\s]/g, "");
+  let adjIsNeg = false;
+  if (cleanedAdj.startsWith("(") && cleanedAdj.endsWith(")")) {
+    adjIsNeg = true;
+    cleanedAdj = cleanedAdj.substring(1, cleanedAdj.length - 1);
+  }
+  if (cleanedAdj === "" || isNaN(Number(cleanedAdj))) { setStatus("Enter a valid Contract Adjust amount.", "err"); return; }
+  const adjAmt = adjIsNeg ? -Number(cleanedAdj) : Number(cleanedAdj);
   setStatus("Applying contract adjustment…", "busy"); setBusy(true);
   try {
-    await Excel.run(async (context) => { await runContractAdjust(context, poNumber, Number(amtRaw), desc); });
+    await Excel.run(async (context) => { await runContractAdjust(context, poNumber, adjAmt, desc); });
     setStatus("Contract adjustment applied (saved as negative).", "ok");
     (document.getElementById("poAdjAmt") as HTMLInputElement).value = "";
     (document.getElementById("poAdjDesc") as HTMLInputElement).value = "";
@@ -427,13 +439,29 @@ function readPOForm(): { source: string; target: string; formData: (string | num
   const source = (document.getElementById("poSource") as HTMLSelectElement).value.trim();
   const target = (document.getElementById("poTarget") as HTMLSelectElement).value.trim();
   const formData: (string | number)[][] = [];
+  // Reuse the same accounting-style number parser that the Invoice Form
+  // gained in v16 — strip $ / commas / whitespace, treat (1,234.56) as
+  // negative, and fall back to "" on non-numeric input. Earlier the bare
+  // Number(amt) call returned NaN on any comma-formatted paste like
+  // "2,345.16", so amounts and PO adjustments silently became blank.
+  const parseAccounting = (raw: string): number | "" => {
+    if (raw === "") return "";
+    let cleaned = raw.replace(/[$,\s]/g, "");
+    let isNeg = false;
+    if (cleaned.startsWith("(") && cleaned.endsWith(")")) {
+      isNeg = true;
+      cleaned = cleaned.substring(1, cleaned.length - 1);
+    }
+    if (cleaned === "" || isNaN(Number(cleaned))) return "";
+    return isNeg ? -Number(cleaned) : Number(cleaned);
+  };
   qsa("#poBody tr").forEach((tr) => {
     const mark = (tr.querySelector(".po-mark") as HTMLInputElement).checked ? "Y" : "";
     const vendor = (tr.querySelector(".po-vendor") as HTMLInputElement).value.trim();
     const num = (tr.querySelector(".po-num") as HTMLInputElement).value.trim();
     const amt = (tr.querySelector(".po-amt") as HTMLInputElement).value.trim();
     const adj = (tr.querySelector(".po-adj") as HTMLInputElement).value.trim();
-    formData.push([mark, vendor, num, amt === "" ? "" : Number(amt), adj === "" ? "" : Number(adj)]);
+    formData.push([mark, vendor, num, parseAccounting(amt), parseAccounting(adj)]);
   });
   return { source, target, formData };
 }
