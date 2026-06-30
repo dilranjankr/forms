@@ -1371,15 +1371,23 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
     wsVT.getRange(`${poTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
 
     if (section === "LCP" && lcpTotalCol && lcpTotalIdx > ldpTotalIdx) {
-      const firstLcpPrCol = CL(ldpTotalIdx + 1);
       const lastLcpPrCol = CL(lcpTotalIdx - 1);
-      wsVT.getRange(`${lcpTotalCol}${row}`).formulas = [[`=${poTotalCol}${row}+SUM(${firstLcpPrCol}${row}:${lastLcpPrCol}${row})`]];
+      // User-specified formula shape:
+      //   =IF(H{row}="","",SUM(H{row}:lastPr{row}))
+      // Includes the PO Total column INSIDE the SUM (matches the user's
+      // manually-correct formula '=IF(H107="","",SUM(H107:AN107))') AND
+      // returns blank when PO Total is empty so vendor rows with no PO
+      // don't render as '$ -'. Previous shape '=H + SUM(prs)' produced
+      // the same arithmetic when H had a value but did not handle the
+      // empty-PO case and the user wanted the column to revert.
+      wsVT.getRange(`${lcpTotalCol}${row}`).formulas = [[`=IF(${poTotalCol}${row}="","",SUM(${poTotalCol}${row}:${lastLcpPrCol}${row}))`]];
       wsVT.getRange(`${lcpTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
       if (ldpTotalCol) wsVT.getRange(`${ldpTotalCol}${row}`).values = [[""]];
     } else if (ldpTotalCol && ldpTotalIdx > poTotalIdx) {
-      const firstLdpPrCol = CL(poTotalIdx + 1);
       const lastLdpPrCol = CL(ldpTotalIdx - 1);
-      wsVT.getRange(`${ldpTotalCol}${row}`).formulas = [[`=${poTotalCol}${row}+SUM(${firstLdpPrCol}${row}:${lastLdpPrCol}${row})`]];
+      // Same shape applied to the LDP-section total so both sections stay
+      // consistent (PO Total included inside the SUM, blank guarded by IF).
+      wsVT.getRange(`${ldpTotalCol}${row}`).formulas = [[`=IF(${poTotalCol}${row}="","",SUM(${poTotalCol}${row}:${lastLdpPrCol}${row}))`]];
       wsVT.getRange(`${ldpTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
       if (lcpTotalCol) wsVT.getRange(`${lcpTotalCol}${row}`).values = [[""]];
     }
