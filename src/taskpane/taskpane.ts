@@ -787,20 +787,17 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
   if (isPR) {
-    // Normalise a description string so PR match tolerates cosmetic
-    // differences that Excel silently introduces (en/em dashes swapped
-    // for hyphens, doubled or trailing spaces, non-breaking spaces,
-    // case differences). Without this, an item like
-    //   "Phase 1 - Levolor Dual Fill Auto-Fill System – Installation..."
-    // (en dash "–") would fail to match the existing row that has a
-    // plain hyphen, and the addin would silently insert a duplicate row
-    // at grandRow instead of updating the existing item.
-    const normDesc = (s: string): string => s
-      .replace(/[–—]/g, "-")   // en dash + em dash -> hyphen
-      .replace(/ /g, " ")             // NBSP -> normal space
-      .replace(/\s+/g, " ")                 // collapse whitespace runs
-      .trim()
-      .toLowerCase();
+    // Aggressive normalisation — strip every character that isn't a
+    // lowercase letter or digit before comparing. v38's per-character
+    // normalisation still missed edge cases (Alt+Enter linebreaks in
+    // invoice cells, curly punctuation, ampersand spacing, etc.) so
+    // the addin kept inserting a duplicate row. Reducing both strings
+    // to alphanumeric-only makes the match invariant to every cosmetic
+    // difference — dashes, spaces, NBSPs, case, punctuation, newlines,
+    // ampersand spacing — while still requiring the underlying words /
+    // numbers to line up exactly.
+    const normDesc = (s: string): string =>
+      s.toLowerCase().replace(/[^a-z0-9]/g, "");
     for (const item of items) {
       if (item.isHdr || item.amt === 0) continue;
       const itemDescN = normDesc(item.desc);
