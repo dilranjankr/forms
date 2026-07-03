@@ -2619,15 +2619,23 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[""]];
       } else {
-        // Kept descriptive zero-value row — non-bold, Invoice Worksheet
-        // carries a literal 0 in Total To date (e.g. "Discussion Points").
-        // Mirror PR#TBB: E / G / I / J / K / M render as $0; L stays
-        // blank because it would be a divide-by-zero.
+        // Kept row that either carries a literal 0 in Total To date
+        // ("Discussion Points" style) OR carries a real value but has
+        // no billing yet (current PR + all prior PRs both zero). For
+        // the billing-side columns we now apply the same "only show
+        // when non-zero" rule that the hasOwnValue branch uses above,
+        // so a row the user did NOT bill in the current PR renders
+        // BLANK in J instead of $0. User asked: "invoice worksheet
+        // me payment request me kuch bhi nhi dala ... payment request
+        // 0 h blank kuch bhi save na ho 0 se jayda ho tbhi ho payment
+        // tracking column me".
+        const jNum = st.jVal === "" || st.jVal === 0 ? 0 : (st.jVal as number);
+        const kNum = st.paidSum + jNum;
         ws.getRange(`E${st.t}`).values = [[0]];
         ws.getRange(`G${st.t}`).values = [[0]];
-        ws.getRange(`I${st.t}`).values = [[0]];
-        ws.getRange(`J${st.t}`).values = [[0]];
-        ws.getRange(`K${st.t}`).values = [[0]];
+        ws.getRange(`I${st.t}`).values = [[st.paidSum !== 0 ? st.paidSum : ""]];
+        ws.getRange(`J${st.t}`).values = [[jNum !== 0 ? jNum : ""]];
+        ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[0]];
       }
