@@ -787,11 +787,27 @@ async function runInputForm(context: Excel.RequestContext, form: InputFormData) 
   if (grandRow === -1) throw new Error("Grand Totals not found.");
 
   if (isPR) {
+    // Normalise a description string so PR match tolerates cosmetic
+    // differences that Excel silently introduces (en/em dashes swapped
+    // for hyphens, doubled or trailing spaces, non-breaking spaces,
+    // case differences). Without this, an item like
+    //   "Phase 1 - Levolor Dual Fill Auto-Fill System – Installation..."
+    // (en dash "–") would fail to match the existing row that has a
+    // plain hyphen, and the addin would silently insert a duplicate row
+    // at grandRow instead of updating the existing item.
+    const normDesc = (s: string): string => s
+      .replace(/[–—]/g, "-")   // en dash + em dash -> hyphen
+      .replace(/ /g, " ")             // NBSP -> normal space
+      .replace(/\s+/g, " ")                 // collapse whitespace runs
+      .trim()
+      .toLowerCase();
     for (const item of items) {
       if (item.isHdr || item.amt === 0) continue;
+      const itemDescN = normDesc(item.desc);
       let matched = false;
       for (let r = 4; r < grandRow - 1; r++) {
-        if (colA[r][0] && String(colA[r][0]).trim() === item.desc) {
+        const cellRaw = colA[r][0] ? String(colA[r][0]) : "";
+        if (cellRaw && normDesc(cellRaw) === itemDescN) {
           wsInv.getRange(`${tgtCol}${r + 1}`).values = [[item.amt]];
           wsInv.getRange(`${tgtCol}${r + 1}`).numberFormat = [[FMT_ACCT]];
           // Right-align amount cells so numbers don't end up left-aligned
@@ -1068,14 +1084,14 @@ async function addDescriptionsToPRTBB(context: Excel.RequestContext, items: Item
       }
       // Set Aptos 9pt on the WHOLE A:D range BEFORE merging so the right-most
       // cell's font doesn't win after merge.
-      wsPR.getRange(`A${targetRow}:D${targetRow}`).format.font.name = "Aptos";
+      wsPR.getRange(`A${targetRow}:D${targetRow}`).format.font.name = "Aptos Narrow";
       wsPR.getRange(`A${targetRow}:D${targetRow}`).format.font.size = 9;
       wsPR.getRange(`A${targetRow}:D${targetRow}`).merge(false);
       subTotalRow++;
     }
     wsPR.getRange(`A${targetRow}`).values = [[desc]];
     // Re-assert Aptos 9pt + normal weight on the merged anchor.
-    wsPR.getRange(`A${targetRow}`).format.font.name = "Aptos";
+    wsPR.getRange(`A${targetRow}`).format.font.name = "Aptos Narrow";
     wsPR.getRange(`A${targetRow}`).format.font.size = 9;
     // Column A descriptions always render in normal weight (not bold), even for
     // sub-header items.
@@ -2293,13 +2309,13 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
 
     // Set Aptos 9pt on the WHOLE A:D range BEFORE merging — Excel's merge logic
     // otherwise tends to inherit the right-most cell's font (Calibri default).
-    wsTBB.getRange(`A${t}:D${t}`).format.font.name = "Aptos";
+    wsTBB.getRange(`A${t}:D${t}`).format.font.name = "Aptos Narrow";
     wsTBB.getRange(`A${t}:D${t}`).format.font.size = 9;
     wsTBB.getRange(`A${t}:D${t}`).merge(false);
     wsTBB.getRange(`A${t}`).values = [[dataRows[i].desc]];
     wsTBB.getRange(`A${t}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
     // Re-assert font on the merged anchor in case merge clobbered it.
-    wsTBB.getRange(`A${t}`).format.font.name = "Aptos";
+    wsTBB.getRange(`A${t}`).format.font.name = "Aptos Narrow";
     wsTBB.getRange(`A${t}`).format.font.size = 9;
     // Mirror the description's bold state from the Invoice Worksheet — if the
     // source row was bold (sub-header) keep it bold here, otherwise normal.
@@ -2425,6 +2441,12 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         wsTBB.getRange(`H${r}`).values = [[payments[i].ptype]];
         wsTBB.getRange(`I${r}`).values = [[payments[i].amount]];
         wsTBB.getRange(`I${r}`).numberFormat = [[fmt]];
+        // Payment rows come across from the Payments sheet, so lock font to
+        // Aptos Narrow 9pt to match the rest of the PR#TBB / snapshot body
+        // instead of inheriting whatever the Payments sheet used (usually
+        // Calibri 11pt).
+        wsTBB.getRange(`G${r}:M${r}`).format.font.name = "Aptos Narrow";
+        wsTBB.getRange(`G${r}:M${r}`).format.font.size = 9;
       }
       // Row 'insertAt + payments.length' stays blank (the new gap row).
       const finalTpRow = newTotalPaid + totalInsert;
@@ -2807,12 +2829,12 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
     const e = entries[i];
     wsVT.getRange(`A${row}`).values = [[e.vendor]];
     wsVT.getRange(`A${row}:H${row}`).format.font.bold = false; // vendor row must be normal, not bold (inherited from contract header)
-    // Centre-align column A on every PO vendor row so it lines up with
-    // the contract description rows above (which get centred by
-    // addVendorTrackingRow). Without this, vendor rows could end up
-    // left-aligned depending on what alignment was inherited from the
-    // template row.
-    wsVT.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+    // Left-align the vendor description (column A). Earlier this was forced
+    // to centre to match the contract heading row above it, but user
+    // now wants the two styles differentiated: contract heading stays
+    // centred (addVendorTrackingRow), vendor / PO descriptions render
+    // left-aligned so long vendor names read naturally from the left.
+    wsVT.getRange(`A${row}`).format.horizontalAlignment = Excel.HorizontalAlignment.left;
     // Force 9pt to match the contract description rows above and avoid
     // size inheritance flipping between 9pt / 12pt depending on which
     // template row Excel picked for the insert.
@@ -3003,10 +3025,9 @@ async function runContractAdjust(context: Excel.RequestContext, poNumber: string
 
   wsVT.getRange(`A${targetRow}:E${targetRow}`).format.font.bold = false;
   wsVT.getRange(`A${targetRow}`).values = [[description]];
-  // Centre-align so this PO-move row matches the contract / vendor rows
-  // already in Vendor Tracking (user asked every VT column-A write to
-  // land centre-aligned regardless of code path).
-  wsVT.getRange(`A${targetRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.center;
+  // Contract-adjust description is a non-heading vendor-side row, so
+  // left-align it to match the PO vendor rows (see poDoAdd).
+  wsVT.getRange(`A${targetRow}`).format.horizontalAlignment = Excel.HorizontalAlignment.left;
   // Lock font size to 9pt so PO-move rows match contract / vendor rows
   // visually instead of inheriting whatever size the surrounding rows had.
   wsVT.getRange(`A${targetRow}:E${targetRow}`).format.font.size = 9;
