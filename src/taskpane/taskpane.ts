@@ -2633,11 +2633,15 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         // v42: use gNum (not literal 0) so a contract-value row kept by the
         // v41 rule shows its E/G/M numbers. Discussion-Points style rows have
         // gNum=0 so they still render as 0/0/0 — no regression.
+        // v43: for I / J / K write the numeric value (even 0) so the
+        // accounting format renders "$ -" instead of a blank cell — user
+        // asked for consistent "$ -" display across all payment columns
+        // for kept-but-unbilled rows.
         ws.getRange(`E${st.t}`).values = [[st.gNum]];
         ws.getRange(`G${st.t}`).values = [[st.gNum]];
-        ws.getRange(`I${st.t}`).values = [[st.paidSum !== 0 ? st.paidSum : ""]];
-        ws.getRange(`J${st.t}`).values = [[jNum !== 0 ? jNum : ""]];
-        ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
+        ws.getRange(`I${st.t}`).values = [[st.paidSum]];
+        ws.getRange(`J${st.t}`).values = [[jNum]];
+        ws.getRange(`K${st.t}`).values = [[kNum]];
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
       }
