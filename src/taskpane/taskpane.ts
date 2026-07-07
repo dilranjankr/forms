@@ -2564,7 +2564,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         const groupEnd = contentEnd_;
         let anyValue = false;
         for (let k = clusterStart; k < groupEnd; k++) {
-          if (rowStates[k].hasOwnValue) { anyValue = true; break; }
+          // v41: keep the section if any row has billing OR any row has a
+          // contract value (gNum != 0). Earlier only billing kept the group.
+          if (rowStates[k].hasOwnValue || rowStates[k].gNum !== 0) { anyValue = true; break; }
         }
         for (let k = clusterStart; k < groupEnd; k++) {
           rowStates[k].keep = anyValue;
