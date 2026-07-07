@@ -2630,13 +2630,16 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         // tracking column me".
         const jNum = st.jVal === "" || st.jVal === 0 ? 0 : (st.jVal as number);
         const kNum = st.paidSum + jNum;
-        ws.getRange(`E${st.t}`).values = [[0]];
-        ws.getRange(`G${st.t}`).values = [[0]];
+        // v42: use gNum (not literal 0) so a contract-value row kept by the
+        // v41 rule shows its E/G/M numbers. Discussion-Points style rows have
+        // gNum=0 so they still render as 0/0/0 — no regression.
+        ws.getRange(`E${st.t}`).values = [[st.gNum]];
+        ws.getRange(`G${st.t}`).values = [[st.gNum]];
         ws.getRange(`I${st.t}`).values = [[st.paidSum !== 0 ? st.paidSum : ""]];
         ws.getRange(`J${st.t}`).values = [[jNum !== 0 ? jNum : ""]];
         ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
         ws.getRange(`L${st.t}`).values = [[""]];
-        ws.getRange(`M${st.t}`).values = [[0]];
+        ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
       }
     }
     await context.sync();
