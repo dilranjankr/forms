@@ -2228,16 +2228,23 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   const needed = dataRows.length;
 
   // Payments
-  const payments: { date: string | number | boolean; ptype: string; amount: number }[] = [];
+  const payments: { date: string | number | boolean; ptype: string; amount: number; comment: string }[] = [];
   if (hasPay) {
-    const pd = await readValues(context, wsPay.getRange(`A2:C${Math.max(payLast, 50)}`));
+    // v44: also read column D (comment / note like "10 Return Fees") so we
+    // can carry it into PR#TBB + snapshots.
+    const pd = await readValues(context, wsPay.getRange(`A2:D${Math.max(payLast, 50)}`));
     for (const r of pd) {
       // Just skip empty rows instead of breaking on them — earlier the loop
       // bailed at the first blank row, so any payment the user added BELOW a
       // gap in the Payments sheet was silently ignored. Now we scan the whole
-      // A2:C50 range and only keep rows that have both a date and an amount.
+      // A2:D50 range and only keep rows that have both a date and an amount.
       if (r[0] !== null && r[0] !== "" && r[2] !== null && r[2] !== "" && !isNaN(Number(r[2]))) {
-        payments.push({ date: r[0], ptype: r[1] ? String(r[1]).trim() : "", amount: Number(r[2]) });
+        payments.push({
+          date: r[0],
+          ptype: r[1] ? String(r[1]).trim() : "",
+          amount: Number(r[2]),
+          comment: r[3] ? String(r[3]).trim() : "",
+        });
       }
     }
   }
@@ -2438,6 +2445,9 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         wsTBB.getRange(`H${r}`).values = [[payments[i].ptype]];
         wsTBB.getRange(`I${r}`).values = [[payments[i].amount]];
         wsTBB.getRange(`I${r}`).numberFormat = [[fmt]];
+        // v44: comment / note from Payments sheet column D goes into J of the
+        // payment row (right after amount). Blank if the payment has no note.
+        wsTBB.getRange(`J${r}`).values = [[payments[i].comment]];
         // Payment rows come across from the Payments sheet, so lock font to
         // Aptos Narrow 9pt to match the rest of the PR#TBB / snapshot body
         // instead of inheriting whatever the Payments sheet used (usually
