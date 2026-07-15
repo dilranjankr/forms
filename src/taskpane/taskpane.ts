@@ -2722,6 +2722,15 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       const val = p.r.values[0][0];
       ws.getRange(`${p.c}${stRow}`).values = [[val !== null ? val : 0]];
     }
+    // v50: force Accounting format on SUB-TOTALS row's $ cells too, so the
+    // totals row aligns visually with the data rows above it. F and L stay
+    // untouched (F is a blank divider, L is percentage).
+    ws.getRange(`E${stRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`G${stRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`I${stRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`J${stRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`K${stRow}`).numberFormat = [[FMT_ACCT]];
+    ws.getRange(`M${stRow}`).numberFormat = [[FMT_ACCT]];
 
     let copyTpRow = -1;
     const gvals = gColCopy.values;
@@ -2740,6 +2749,12 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
       ws.getRange(`M${copyTpRow + 1}`).values = [[m1 !== null ? m1 : 0]];
       const m2 = foot.values[2] ? foot.values[2][4] : 0;
       ws.getRange(`M${copyTpRow + 2}`).values = [[m2 !== null ? m2 : 0]];
+      // v50: force Accounting format on Total Paid To date + the two M
+      // rows below it (retention / balance) so they line up with SUB-TOTALS.
+      ws.getRange(`I${copyTpRow}`).numberFormat = [[FMT_ACCT]];
+      ws.getRange(`M${copyTpRow}`).numberFormat = [[FMT_ACCT]];
+      ws.getRange(`M${copyTpRow + 1}`).numberFormat = [[FMT_ACCT]];
+      ws.getRange(`M${copyTpRow + 2}`).numberFormat = [[FMT_ACCT]];
     }
     await context.sync();
 
