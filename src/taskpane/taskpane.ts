@@ -1375,6 +1375,10 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
   // in poDoAdd checks PO NUMBER in column E, not vendor name), so those
   // pink highlights are just visual noise.
   wsVT.getRange(`A6:A${vtLast}`).conditionalFormats.clearAll();
+  // v46: also clear static cell fills (background colors) on column A so
+  // previously highlighted rows (either from an old CF rule that got
+  // baked in, or manual fills) also reset to a clean look.
+  wsVT.getRange(`A6:A${vtLast}`).format.fill.clear();
 
   const rows = await readValues(context, wsVT.getRange(`A6:E${vtLast}`)); // A..E
   let section = "LDP"; // driven by bold "LDP"/"LCP" marker rows in column A
