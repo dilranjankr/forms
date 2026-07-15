@@ -1367,6 +1367,15 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
   // gap row) still stop the walk at the analysis band, so we don't
   // accidentally process the post-vendor totals rows.
   const vtLast = await getSafeLastRow(context, wsVT, 80);
+
+  // v45: strip any conditional formatting from the vendor description column
+  // (A). Some workbooks carry a "Highlight Duplicate Values" rule that
+  // pink-flags a vendor appearing in more than one Change Order section.
+  // Same vendor across different POs is legitimate (the duplicate guard
+  // in poDoAdd checks PO NUMBER in column E, not vendor name), so those
+  // pink highlights are just visual noise.
+  wsVT.getRange(`A6:A${vtLast}`).conditionalFormats.clearAll();
+
   const rows = await readValues(context, wsVT.getRange(`A6:E${vtLast}`)); // A..E
   let section = "LDP"; // driven by bold "LDP"/"LCP" marker rows in column A
   for (let i = 0; i < rows.length; i++) {
