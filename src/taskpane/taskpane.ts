@@ -2648,6 +2648,16 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${st.t}`).values = [[kNum !== 0 ? kNum : ""]];
         ws.getRange(`L${st.t}`).values = [[kNum !== 0 ? kNum / st.gNum : ""]];
         ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
+        // v49: force Accounting format on every $ column so the snapshot
+        // renders "$    #,##0.00" uniformly instead of mixing tight $ from
+        // FMT_USD cells and space-fill $ from FMT_ACCT cells inherited from
+        // the PR#TBB template. L stays as-is (percentage).
+        ws.getRange(`E${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`G${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`I${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`J${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`K${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`M${st.t}`).numberFormat = [[FMT_ACCT]];
       } else if (st.isBold || st.gIsEmpty) {
         // Bold sub-header rows ("Original Contract - LDP", "LCP", project
         // titles like "Lot 5 Boinapalli ...") always render blank in the
@@ -2689,6 +2699,14 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
         ws.getRange(`K${st.t}`).values = [[kNum]];
         ws.getRange(`L${st.t}`).values = [[""]];
         ws.getRange(`M${st.t}`).values = [[st.gNum - kNum]];
+        // v49: same Accounting format as the hasOwnValue branch so unbilled
+        // contract-value rows also render with uniform "$    #,##0.00".
+        ws.getRange(`E${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`G${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`I${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`J${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`K${st.t}`).numberFormat = [[FMT_ACCT]];
+        ws.getRange(`M${st.t}`).numberFormat = [[FMT_ACCT]];
       }
     }
     await context.sync();
