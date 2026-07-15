@@ -120,7 +120,7 @@
 
     <main id="app-body" style="display: none;">
 
-        <div class="topbar">PROJECT UPDATE <span style="font-size:10px;opacity:0.7;font-weight:normal;">v47</span></div>
+        <div class="topbar">PROJECT UPDATE <span style="font-size:10px;opacity:0.7;font-weight:normal;">v48</span></div>
 
         <div class="tabs">
             <button class="tab active" data-tab="invoice">Invoice Form</button>
@@ -394,6 +394,20 @@
           </div>
         </div>
 
+      </div>
+    </div>
+
+    <!-- Generic warning / validation modal (single OK button). Used by the
+         Invoice Form to enforce "at least one description required". -->
+    <div id="warnModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:1000;">
+      <div style="background:#fff; border-radius:4px; padding:18px 20px; box-shadow:0 8px 24px rgba(0,0,0,0.25); width:300px; max-width:92%; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); -ms-transform:translate(-50%,-50%);">
+        <div id="warnTitle" style="font-size:15px; font-weight:700; color:#c0392b; margin-bottom:10px;">⚠ Description Required</div>
+        <div id="warnBody" style="font-size:12.5px; line-height:1.55; color:#2a2a2a; margin-bottom:14px;">
+          Please enter at least one line-item description before saving.
+        </div>
+        <div style="text-align:right;">
+          <button id="warnOk" class="btn" style="width:auto; padding:8px 14px; margin:0; display:inline-block;">OK</button>
+        </div>
       </div>
     </div>
 

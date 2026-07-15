@@ -343,7 +343,18 @@ async function generate() {
   const form = readForm();
   if (!form.secType) { setStatus("Select a Section Type.", "err"); return; }
   if (!form.colName) { setStatus("Enter a Column Name.", "err"); return; }
-  if (form.items.length === 0) { setStatus("Add at least one line item.", "err"); return; }
+  // v48: hard-require at least one line-item description via a popup instead
+  // of the (easy-to-miss) status text. readForm() drops rows whose desc
+  // field is empty, so items.length === 0 means the user tried to save
+  // with zero descriptions filled.
+  if (form.items.length === 0) {
+    await showWarnModal(
+      "Please enter at least one line-item description before saving.",
+      "Description Required"
+    );
+    setStatus("Add at least one line item.", "err");
+    return;
+  }
 
   const isPR = form.secType === "Payment Request";
   setStatus(isPR ? "Saving PR + updating Vendor Tracking…" : "Saving to Workbook…", "busy");
@@ -496,6 +507,22 @@ async function loadEst() {
     console.error(e);
     setStatus("ERROR: " + errMsg(e), "err");
   } finally { setBusy(false); }
+}
+
+// v48: single-button warn/info modal. Used by the Invoice Form to enforce
+// "at least one description required" before saving. `window.alert` is
+// silently ignored inside the Office Add-in webview, so we render our own.
+function showWarnModal(message?: string, title?: string): Promise<void> {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("warnModal") as HTMLElement;
+    if (!modal) { resolve(); return; }
+    if (title) (document.getElementById("warnTitle") as HTMLElement).textContent = "⚠ " + title;
+    if (message) (document.getElementById("warnBody") as HTMLElement).textContent = message;
+    const ok = document.getElementById("warnOk") as HTMLElement;
+    const cleanup = () => { modal.style.display = "none"; ok.onclick = null; };
+    ok.onclick = () => { cleanup(); resolve(); };
+    modal.style.display = "";
+  });
 }
 
 // In-page Yes/No modal for duplicate POs. `window.confirm` is silently
