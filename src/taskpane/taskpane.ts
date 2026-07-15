@@ -1368,18 +1368,6 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
   // accidentally process the post-vendor totals rows.
   const vtLast = await getSafeLastRow(context, wsVT, 80);
 
-  // v45: strip any conditional formatting from the vendor description column
-  // (A). Some workbooks carry a "Highlight Duplicate Values" rule that
-  // pink-flags a vendor appearing in more than one Change Order section.
-  // Same vendor across different POs is legitimate (the duplicate guard
-  // in poDoAdd checks PO NUMBER in column E, not vendor name), so those
-  // pink highlights are just visual noise.
-  wsVT.getRange(`A6:A${vtLast}`).conditionalFormats.clearAll();
-  // v46: also clear static cell fills (background colors) on column A so
-  // previously highlighted rows (either from an old CF rule that got
-  // baked in, or manual fills) also reset to a clean look.
-  wsVT.getRange(`A6:A${vtLast}`).format.fill.clear();
-
   const rows = await readValues(context, wsVT.getRange(`A6:E${vtLast}`)); // A..E
   let section = "LDP"; // driven by bold "LDP"/"LCP" marker rows in column A
   for (let i = 0; i < rows.length; i++) {
@@ -1397,6 +1385,13 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
     const isMainContract = b !== "" && b !== null && Number(b) > 0;
     const isVendorRow = e !== "" && e !== null && !isMainContract;
     if (!isVendorRow) continue;
+
+    // v47: clear conditional formatting and static cell fill on THIS vendor
+    // row's description cell only. Earlier v45/v46 blanket-cleared the whole
+    // A6:A{vtLast} range, which also wiped intentional fills on section
+    // headers / Change Order title rows. Restricted to PO rows only per user.
+    wsVT.getRange(`A${row}`).conditionalFormats.clearAll();
+    wsVT.getRange(`A${row}`).format.fill.clear();
 
     wsVT.getRange(`${poTotalCol}${row}`).formulas = [[`=SUM(F${row}:G${row})`]];
     wsVT.getRange(`${poTotalCol}${row}`).numberFormat = [[FMT_ACCT]];
