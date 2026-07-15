@@ -2392,10 +2392,15 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   }
   await context.sync();
 
-  wsTBB.getRange(`E${tbbStart}:G${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
+  // v51: PR#TBB data band — use Accounting (FMT_ACCT = `fmt`) uniformly on
+  // every $ column so PR#TBB itself matches the per-PR snapshots (which
+  // v49/v50 already normalize). Earlier E/G and M carried the tight
+  // "$"#,##0.00 format while I/K used Accounting — inconsistent look.
+  wsTBB.getRange(`E${tbbStart}:G${lastD}`).numberFormat = [[fmt]];
   wsTBB.getRange(`I${tbbStart}:K${lastD}`).numberFormat = [[fmt]];
   wsTBB.getRange(`L${tbbStart}:L${lastD}`).numberFormat = [["0%"]];
-  wsTBB.getRange(`M${tbbStart}:M${lastD}`).numberFormat = [["\"$\"#,##0.00"]];
+  wsTBB.getRange(`M${tbbStart}:M${lastD}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`J${tbbStart}:J${lastD}`).numberFormat = [[fmt]];
   wsTBB.getRange(`J${tbbStart}:J${lastD}`).format.fill.color = "#FFFF00";
 
   // Strip ONLY the horizontal cell borders from the data band so the rows
@@ -2431,6 +2436,14 @@ async function runInvoiceGenerate(context: Excel.RequestContext) {
   wsTBB.getRange(`K${stRow}`).formulas = [[`=SUM(K${tbbStart}:K${lastD})`]];
   wsTBB.getRange(`L${stRow}`).formulas = [[`=IFERROR(K${stRow}/G${stRow},0)`]];
   wsTBB.getRange(`M${stRow}`).formulas = [[`=SUM(M${tbbStart}:M${lastD})`]];
+  // v51: PR#TBB SUB-TOTALS row — Accounting format on every $ column so the
+  // totals row aligns visually with the data band above it.
+  wsTBB.getRange(`E${stRow}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`G${stRow}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`I${stRow}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`J${stRow}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`K${stRow}`).numberFormat = [[fmt]];
+  wsTBB.getRange(`M${stRow}`).numberFormat = [[fmt]];
   await context.sync();
 
   // Invoiced to Date + Payments
