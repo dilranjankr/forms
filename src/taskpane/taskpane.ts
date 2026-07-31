@@ -2936,6 +2936,27 @@ async function poDoAdd(context: Excel.RequestContext, wsVT: Excel.Worksheet, con
   wsVT.getRange(`${insertAt}:${insertAt + entries.length - 1}`).insert(Excel.InsertShiftDirection.down);
   await context.sync();
 
+  // v53: re-draw the vertical divider on column E's left edge for the new
+  // rows. Inserted rows inherit formatting from the row above, which can be
+  // a border-less gap/heading row — the E-column border line then visibly
+  // "breaks" on freshly added PO rows. Copy the edgeLeft border style from
+  // the contract heading row's E cell (that row always carries the divider);
+  // fall back to a plain continuous line if the source has none.
+  const srcB = wsVT.getRange(`E${contractRow}`).format.borders.getItem(Excel.BorderIndex.edgeLeft);
+  srcB.load(["style", "color", "weight"]);
+  await context.sync();
+  for (let i = 0; i < entries.length; i++) {
+    const nb = wsVT.getRange(`E${insertAt + i}`).format.borders.getItem(Excel.BorderIndex.edgeLeft);
+    if (srcB.style !== Excel.BorderLineStyle.none) {
+      nb.style = srcB.style;
+      nb.color = srcB.color;
+      nb.weight = srcB.weight;
+    } else {
+      nb.style = Excel.BorderLineStyle.continuous;
+    }
+  }
+  await context.sync();
+
   for (let i = 0; i < entries.length; i++) {
     const row = insertAt + i;
     const e = entries[i];
