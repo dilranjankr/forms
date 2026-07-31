@@ -1390,8 +1390,8 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
   // '=POTotal + SUM(...prs)' formula. User reported: "Total column me
   // update nhi ho raha h". Switched to getSafeLastRow so the scan
   // automatically extends to whatever the workbook actually uses. The
-  // existing inner break conditions ('Client total' / 'Analysis' / blank
-  // gap row) still stop the walk at the analysis band, so we don't
+  // analysis-band rows ('Client total' / 'Analysis' / blank gap rows) are
+  // skipped inside the loop (v52: skip, not break — see below), so we don't
   // accidentally process the post-vendor totals rows.
   const vtLast = await getSafeLastRow(context, wsVT, 80);
 
@@ -1403,7 +1403,14 @@ async function repairAllVendorTrackingFormulas(context: Excel.RequestContext, ws
 
     if (name === "LDP") { section = "LDP"; continue; }
     if (name === "LCP") { section = "LCP"; continue; }
-    if (name.includes("Analysis") || name.includes("Client total") || name.includes("Client Total")) break;
+    // v52: SKIP the analysis / totals rows instead of STOPPING there. The
+    // "Without Estimate" vendor block can sit BELOW the analysis band in
+    // some workbooks, and with a hard break those PO rows never received
+    // the Total formula (user: PO added under Without Estimate must update
+    // the Total column exactly like LCP section rows do). Non-PO rows
+    // below the band stay untouched — the isVendorRow test (PO number in
+    // E, no contract total in B) filters them out.
+    if (name.includes("Analysis") || name.includes("Client total") || name.includes("Client Total")) continue;
     if (name === "" || name.includes("Project Management") || name.includes("Sub-Contractor")
       || name.includes("Percentage") || name.includes("Gross Margin")) continue;
 
